@@ -1,0 +1,180 @@
+Subject: [PATCH v4 0/12] Add support for OPEN Alliance 10BASE-T1x MACPHY
+ Serial Interface
+From: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Date: Thu, 18 Apr 2024 18:26:36 +0530
+Message-Id: <20240418125648.372526-1-Parthiban.Veerasooran@microchip.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+This patch series contain the below updates,
+- Adds support for OPEN Alliance 10BASE-T1x MACPHY Serial Interface in the
+  net/ethernet/oa_tc6.c.
+  Link to the spec:
+  -----------------
+  https://opensig.org/download/document/OPEN_Alliance_10BASET1x_MAC-PHY_Serial_Interface_V1.1.pdf
+
+- Adds driver support for Microchip LAN8650/1 Rev.B1 10BASE-T1S MACPHY
+  Ethernet driver in the net/ethernet/microchip/lan865x/lan865x.c.
+  Link to the product:
+  --------------------
+  https://www.microchip.com/en-us/product/lan8650
+
+Testing Details:
+----------------
+The driver performance was tested using iperf3 in the below two setups
+separately.
+
+Setup 1:
+--------
+Node 0 - Raspberry Pi 4 with LAN8650 MAC-PHY 
+Node 1 - Raspberry Pi 4 with EVB-LAN8670-USB USB Stick
+
+Setup 2:
+--------
+Node 0 - SAMA7G54-EK with LAN8650 MAC-PHY 
+Node 1 - Raspberry Pi 4 with EVB-LAN8670-USB USB Stick
+
+Achieved maximum of 9.4 Mbps.
+
+Some systems like Raspberry Pi 4 need performance mode enabled to get the
+proper clock speed for SPI. Refer below link for more details.
+
+https://github.com/raspberrypi/linux/issues/3381#issuecomment-1144723750
+
+Changes:
+v2:
+- Removed RFC tag.
+- OA TC6 framework configured in the Kconfig and Makefile to compile as a
+  module.
+- Kerneldoc headers added for all the API methods exposed to MAC driver.
+- Odd parity calculation logic updated from the below link,
+  https://elixir.bootlin.com/linux/latest/source/lib/bch.c#L348
+- Control buffer memory allocation moved to the initial function.
+- struct oa_tc6 implemented as an obaque structure.
+- Removed kthread for handling mac-phy interrupt instead threaded irq is
+  used.
+- Removed interrupt implementation for soft reset handling instead of
+  that polling has been implemented.
+- Registers name in the defines changed according to the specification
+  document.
+- Registers defines are arranged in the order of offset and followed by
+  register fields.
+- oa_tc6_write_register() implemented for writing a single register and
+  oa_tc6_write_registers() implemented for writing multiple registers.
+- oa_tc6_read_register() implemented for reading a single register and
+  oa_tc6_read_registers() implemented for reading multiple registers.
+- Removed DRV_VERSION macro as git hash provided by ethtool.
+- Moved MDIO bus registration and PHY initialization to the OA TC6 lib.
+- Replaced lan865x_set/get_link_ksettings() functions with
+  phy_ethtool_ksettings_set/get() functions.
+- MAC-PHY's standard capability register values checked against the
+  user configured values.
+- Removed unnecessary parameters validity check in various places.
+- Removed MAC address configuration in the lan865x_net_open() function as
+  it is done in the lan865x_probe() function already.
+- Moved standard registers and proprietary vendor registers to the
+  respective files.
+- Added proper subject prefixes for the DT bindings.
+- Moved OA specific properties to a separate DT bindings and corrected the
+  types & mistakes in the DT bindings.
+- Inherited OA specific DT bindings to the LAN865x specific DT bindings.
+- Removed sparse warnings in all the places.
+- Used net_err_ratelimited() for printing the error messages.
+- oa_tc6_process_rx_chunks() function and the content of oa_tc6_handler()
+  function are split into small functions.
+- Used proper macros provided by network layer for calculating the
+  MAX_ETH_LEN.
+- Return value of netif_rx() function handled properly.
+- Removed unnecessary NULL initialization of skb in the
+  oa_tc6_rx_eth_ready() function removed.
+- Local variables declaration ordered in reverse xmas tree notation.
+
+v3:
+- Completely redesigned all the patches.
+- Control and data interface patches are divided into multiple small
+  patches.
+- Device driver APIs added in the oa-tc6-framework.rst file.
+- Code readability improved in all the patches.
+- Defined macros wherever is possible.
+- Changed RESETC to STATUS0_RESETC for improving the readability.
+- Removed OA specific DT bindings.
+- Used default configurations defined in the OA spec.
+- All variables are named properly as per OA spec for more redability.
+- Bigger functions are split into multiple smaller functions.
+- DT binding check is done.
+- Phy mask is removed in phy scanning.
+- Used NET_RX_DROP to compare the rx packet submission status.
+- Indentation in the Kconfig file corrected.
+- Removed CONFIG_OF and CONFIG_ACPI ifdefs.
+- Removed MODULE_ALIAS().
+
+v4:
+- Fixed indentation in oa-tc6-framework.rst file.
+- Replaced ENODEV error code with EPROTO in the
+  oa_tc6_check_ctrl_write_reply and oa_tc6_check_ctrl_read_reply()
+  functions.
+- Renamed oa_tc6_read_sw_reset_status() function as
+  oa_tc6_read_status0().
+- Changed software reset polling delay as 1ms and polling timeout as 1s.
+- Implemented clause 45 registers direct access.
+- Replaced ENODEV error code with ENOMEM in the
+  oa_tc6_mdiobus_register() function.
+- Changed transmit skbs queue size as 2.
+- Added skb_linearize() function to convert contiguous packet data.
+- Checked kthread_should_stop() in the oa_tc6_spi_thread_handler()
+  function before proceeding for the oa_tc6_try_spi_transfer().
+- Removed netdev_err() print in the oa_tc6_allocate_rx_skb() function.
+- Added spi-peripheral-props reference in the dt-bindings.
+- Changed the fallback order in the dt-bindings.
+- Replaced netif_start_queue() with netif_wake_queue().
+- Empty data transfer performed in the oa_tc6_init() function to clear
+  the reset complete interrupt.
+- ZARFE bit in the CONFIG0 register is set to 1 to avoid lan865x halt
+  based on the recommendation in the lan865x errata.
+
+Parthiban Veerasooran (12):
+  Documentation: networking: add OPEN Alliance 10BASE-T1x MAC-PHY serial
+    interface
+  net: ethernet: oa_tc6: implement register write operation
+  net: ethernet: oa_tc6: implement register read operation
+  net: ethernet: oa_tc6: implement software reset
+  net: ethernet: oa_tc6: implement error interrupts unmasking
+  net: ethernet: oa_tc6: implement internal PHY initialization
+  net: ethernet: oa_tc6: enable open alliance tc6 data communication
+  net: ethernet: oa_tc6: implement transmit path to transfer tx ethernet
+    frames
+  net: ethernet: oa_tc6: implement receive path to receive rx ethernet
+    frames
+  net: ethernet: oa_tc6: implement mac-phy interrupt
+  microchip: lan865x: add driver support for Microchip's LAN865X MAC-PHY
+  dt-bindings: net: add Microchip's LAN865X 10BASE-T1S MACPHY
+
+ .../bindings/net/microchip,lan865x.yaml       |   80 +
+ Documentation/networking/oa-tc6-framework.rst |  491 ++++++
+ MAINTAINERS                                   |   15 +
+ drivers/net/ethernet/Kconfig                  |   11 +
+ drivers/net/ethernet/Makefile                 |    1 +
+ drivers/net/ethernet/microchip/Kconfig        |    1 +
+ drivers/net/ethernet/microchip/Makefile       |    1 +
+ .../net/ethernet/microchip/lan865x/Kconfig    |   19 +
+ .../net/ethernet/microchip/lan865x/Makefile   |    6 +
+ .../net/ethernet/microchip/lan865x/lan865x.c  |  384 +++++
+ drivers/net/ethernet/oa_tc6.c                 | 1321 +++++++++++++++++
+ drivers/net/phy/microchip_t1s.c               |   30 +
+ include/linux/oa_tc6.h                        |   23 +
+ include/uapi/linux/mdio.h                     |    1 +
+ 14 files changed, 2384 insertions(+)
+ create mode 100644 Documentation/devicetree/bindings/net/microchip,lan865x.yaml
+ create mode 100644 Documentation/networking/oa-tc6-framework.rst
+ create mode 100644 drivers/net/ethernet/microchip/lan865x/Kconfig
+ create mode 100644 drivers/net/ethernet/microchip/lan865x/Makefile
+ create mode 100644 drivers/net/ethernet/microchip/lan865x/lan865x.c
+ create mode 100644 drivers/net/ethernet/oa_tc6.c
+ create mode 100644 include/linux/oa_tc6.h
+
+-- 
+2.34.1
+
+
+

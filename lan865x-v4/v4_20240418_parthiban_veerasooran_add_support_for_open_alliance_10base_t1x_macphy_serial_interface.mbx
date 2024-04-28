@@ -1,0 +1,3409 @@
+From git@z Thu Jan  1 00:00:00 1970
+Subject: [PATCH v4 1/12] Documentation: networking: add OPEN Alliance
+ 10BASE-T1x MAC-PHY serial interface
+From: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Date: Thu, 18 Apr 2024 18:26:37 +0530
+Message-Id: <20240418125648.372526-2-Parthiban.Veerasooran@microchip.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+The IEEE 802.3cg project defines two 10 Mbit/s PHYs operating over a
+single pair of conductors. The 10BASE-T1L (Clause 146) is a long reach
+PHY supporting full duplex point-to-point operation over 1 km of single
+balanced pair of conductors. The 10BASE-T1S (Clause 147) is a short reach
+PHY supporting full / half duplex point-to-point operation over 15 m of
+single balanced pair of conductors, or half duplex multidrop bus
+operation over 25 m of single balanced pair of conductors.
+
+Furthermore, the IEEE 802.3cg project defines the new Physical Layer
+Collision Avoidance (PLCA) Reconciliation Sublayer (Clause 148) meant to
+provide improved determinism to the CSMA/CD media access method. PLCA
+works in conjunction with the 10BASE-T1S PHY operating in multidrop mode.
+
+The aforementioned PHYs are intended to cover the low-speed / low-cost
+applications in industrial and automotive environment. The large number
+of pins (16) required by the MII interface, which is specified by the
+IEEE 802.3 in Clause 22, is one of the major cost factors that need to be
+addressed to fulfil this objective.
+
+The MAC-PHY solution integrates an IEEE Clause 4 MAC and a 10BASE-T1x PHY
+exposing a low pin count Serial Peripheral Interface (SPI) to the host
+microcontroller. This also enables the addition of Ethernet functionality
+to existing low-end microcontrollers which do not integrate a MAC
+controller.
+
+Signed-off-by: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+---
+ Documentation/networking/oa-tc6-framework.rst | 491 ++++++++++++++++++
+ MAINTAINERS                                   |   6 +
+ 2 files changed, 497 insertions(+)
+ create mode 100644 Documentation/networking/oa-tc6-framework.rst
+
+diff --git a/Documentation/networking/oa-tc6-framework.rst b/Documentation/networking/oa-tc6-framework.rst
+new file mode 100644
+index 000000000000..35c85676e64a
+--- /dev/null
++++ b/Documentation/networking/oa-tc6-framework.rst
+@@ -0,0 +1,491 @@
++.. SPDX-License-Identifier: GPL-2.0+
++
++=========================================================================
++OPEN Alliance 10BASE-T1x MAC-PHY Serial Interface (TC6) Framework Support
++=========================================================================
++
++Introduction
++------------
++
++The IEEE 802.3cg project defines two 10 Mbit/s PHYs operating over a
++single pair of conductors. The 10BASE-T1L (Clause 146) is a long reach
++PHY supporting full duplex point-to-point operation over 1 km of single
++balanced pair of conductors. The 10BASE-T1S (Clause 147) is a short reach
++PHY supporting full / half duplex point-to-point operation over 15 m of
++single balanced pair of conductors, or half duplex multidrop bus
++operation over 25 m of single balanced pair of conductors.
++
++Furthermore, the IEEE 802.3cg project defines the new Physical Layer
++Collision Avoidance (PLCA) Reconciliation Sublayer (Clause 148) meant to
++provide improved determinism to the CSMA/CD media access method. PLCA
++works in conjunction with the 10BASE-T1S PHY operating in multidrop mode.
++
++The aforementioned PHYs are intended to cover the low-speed / low-cost
++applications in industrial and automotive environment. The large number
++of pins (16) required by the MII interface, which is specified by the
++IEEE 802.3 in Clause 22, is one of the major cost factors that need to be
++addressed to fulfil this objective.
++
++The MAC-PHY solution integrates an IEEE Clause 4 MAC and a 10BASE-T1x PHY
++exposing a low pin count Serial Peripheral Interface (SPI) to the host
++microcontroller. This also enables the addition of Ethernet functionality
++to existing low-end microcontrollers which do not integrate a MAC
++controller.
++
++Overview
++--------
++
++The MAC-PHY is specified to carry both data (Ethernet frames) and control
++(register access) transactions over a single full-duplex serial peripheral
++interface.
++
++Protocol Overview
++-----------------
++
++Two types of transactions are defined in the protocol: data transactions
++for Ethernet frame transfers and control transactions for register
++read/write transfers. A chunk is the basic element of data transactions
++and is composed of 4 bytes of overhead plus 64 bytes of payload size for
++each chunk. Ethernet frames are transferred over one or more data chunks.
++Control transactions consist of one or more register read/write control
++commands.
++
++SPI transactions are initiated by the SPI host with the assertion of CSn
++low to the MAC-PHY and ends with the deassertion of CSn high. In between
++each SPI transaction, the SPI host may need time for additional
++processing and to setup the next SPI data or control transaction.
++
++SPI data transactions consist of an equal number of transmit (TX) and
++receive (RX) chunks. Chunks in both transmit and receive directions may
++or may not contain valid frame data independent from each other, allowing
++for the simultaneous transmission and reception of different length
++frames.
++
++Each transmit data chunk begins with a 32-bit data header followed by a
++data chunk payload on MOSI. The data header indicates whether transmit
++frame data is present and provides the information to determine which
++bytes of the payload contain valid frame data.
++
++In parallel, receive data chunks are received on MISO. Each receive data
++chunk consists of a data chunk payload ending with a 32-bit data footer.
++The data footer indicates if there is receive frame data present within
++the payload or not and provides the information to determine which bytes
++of the payload contain valid frame data.
++
++Reference
++---------
++
++10BASE-T1x MAC-PHY Serial Interface Specification,
++
++Link: https://opensig.org/download/document/OPEN_Alliance_10BASET1x_MAC-PHY_Serial_Interface_V1.1.pdf
++
++Hardware Architecture
++---------------------
++
++.. code-block:: none
++
++  +----------+      +-------------------------------------+
++  |          |      |                MAC-PHY              |
++  |          |<---->| +-----------+  +-------+  +-------+ |
++  | SPI Host |      | | SPI Slave |  |  MAC  |  |  PHY  | |
++  |          |      | +-----------+  +-------+  +-------+ |
++  +----------+      +-------------------------------------+
++
++Software Architecture
++---------------------
++
++.. code-block:: none
++
++  +----------------------------------------------------------+
++  |                 Networking Subsystem                     |
++  +----------------------------------------------------------+
++            / \                             / \
++             |                               |
++             |                               |
++            \ /                              |
++  +----------------------+     +-----------------------------+
++  |     MAC Driver       |<--->| OPEN Alliance TC6 Framework |
++  +----------------------+     +-----------------------------+
++            / \                             / \
++             |                               |
++             |                               |
++             |                              \ /
++  +----------------------------------------------------------+
++  |                    SPI Subsystem                         |
++  +----------------------------------------------------------+
++                          / \
++                           |
++                           |
++                          \ /
++  +----------------------------------------------------------+
++  |                10BASE-T1x MAC-PHY Device                 |
++  +----------------------------------------------------------+
++
++Implementation
++--------------
++
++MAC Driver
++~~~~~~~~~~
++
++- Probed by SPI subsystem.
++
++- Initializes OA TC6 framework for the MAC-PHY.
++
++- Registers and configures the network device.
++
++- Sends the tx ethernet frames from n/w subsystem to OA TC6 framework.
++
++OPEN Alliance TC6 Framework
++~~~~~~~~~~~~~~~~~~~~~~~~~~~
++
++- Initializes PHYLIB interface.
++
++- Registers mac-phy interrupt.
++
++- Performs mac-phy register read/write operation using the control
++  transaction protocol specified in the OPEN Alliance 10BASE-T1x MAC-PHY
++  Serial Interface specification.
++
++- Performs Ethernet frames transaction using the data transaction protocol
++  for Ethernet frames specified in the OPEN Alliance 10BASE-T1x MAC-PHY
++  Serial Interface specification.
++
++- Forwards the received Ethernet frame from 10Base-T1x MAC-PHY to n/w
++  subsystem.
++
++Data Transaction
++~~~~~~~~~~~~~~~~
++
++The Ethernet frames that are typically transferred from the SPI host to
++the MAC-PHY will be converted into multiple transmit data chunks. Each
++transmit data chunk will have a 4 bytes header which contains the
++information needed to determine the validity and the location of the
++transmit frame data within the 64 bytes data chunk payload.
++
++.. code-block:: none
++
++  +---------------------------------------------------+
++  |                     Tx Chunk                      |
++  | +---------------------------+  +----------------+ |   MOSI
++  | | 64 bytes chunk payload    |  | 4 bytes header | |------------>
++  | +---------------------------+  +----------------+ |
++  +---------------------------------------------------+
++
++4 bytes header contains the below fields,
++
++DNC (Bit 31) - Data-Not-Control flag. This flag specifies the type of SPI
++               transaction. For TX data chunks, this bit shall be ’1’.
++               0 - Control command
++               1 - Data chunk
++
++SEQ (Bit 30) - Data Chunk Sequence. This bit is used to indicate an
++               even/odd transmit data chunk sequence to the MAC-PHY.
++
++NORX (Bit 29) - No Receive flag. The SPI host may set this bit to prevent
++                the MAC-PHY from conveying RX data on the MISO for the
++                current chunk (DV = 0 in the footer), indicating that the
++                host would not process it. Typically, the SPI host should
++                set NORX = 0 indicating that it will accept and process
++                any receive frame data within the current chunk.
++
++RSVD (Bit 28..24) - Reserved: All reserved bits shall be ‘0’.
++
++VS (Bit 23..22) - Vendor Specific. These bits are implementation specific.
++                  If the MAC-PHY does not implement these bits, the host
++                  shall set them to ‘0’.
++
++DV (Bit 21) - Data Valid flag. The SPI host uses this bit to indicate
++              whether the current chunk contains valid transmit frame data
++              (DV = 1) or not (DV = 0). When ‘0’, the MAC-PHY ignores the
++              chunk payload. Note that the receive path is unaffected by
++              the setting of the DV bit in the data header.
++
++SV (Bit 20) - Start Valid flag. The SPI host shall set this bit when the
++              beginning of an Ethernet frame is present in the current
++              transmit data chunk payload. Otherwise, this bit shall be
++              zero. This bit is not to be confused with the Start-of-Frame
++              Delimiter (SFD) byte described in IEEE 802.3 [2].
++
++SWO (Bit 19..16) - Start Word Offset. When SV = 1, this field shall
++                   contain the 32-bit word offset into the transmit data
++                   chunk payload that points to the start of a new
++                   Ethernet frame to be transmitted. The host shall write
++                   this field as zero when SV = 0.
++
++RSVD (Bit 15) - Reserved: All reserved bits shall be ‘0’.
++
++EV (Bit 14) - End Valid flag. The SPI host shall set this bit when the end
++              of an Ethernet frame is present in the current transmit data
++              chunk payload. Otherwise, this bit shall be zero.
++
++EBO (Bit 13..8) - End Byte Offset. When EV = 1, this field shall contain
++                  the byte offset into the transmit data chunk payload
++                  that points to the last byte of the Ethernet frame to
++                  transmit. This field shall be zero when EV = 0.
++
++TSC (Bit 7..6) - Timestamp Capture. Request a timestamp capture when the
++                 frame is transmitted onto the network.
++                 00 - Do not capture a timestamp
++                 01 - Capture timestamp into timestamp capture register A
++                 10 - Capture timestamp into timestamp capture register B
++                 11 - Capture timestamp into timestamp capture register C
++
++RSVD (Bit 5..1) - Reserved: All reserved bits shall be ‘0’.
++
++P (Bit 0) - Parity. Parity bit calculated over the transmit data header.
++            Method used is odd parity.
++
++The number of buffers available in the MAC-PHY to store the incoming
++transmit data chunk payloads is represented as transmit credits. The
++available transmit credits in the MAC-PHY can be read either from the
++Buffer Status Register or footer (Refer below for the footer info)
++received from the MAC-PHY. The SPI host should not write more data chunks
++than the available transmit credits as this will lead to transmit buffer
++overflow error.
++
++In case the previous data footer had no transmit credits available and
++once the transmit credits become available for transmitting transmit data
++chunks, the MAC-PHY interrupt is asserted to SPI host. On reception of the
++first data header this interrupt will be deasserted and the received
++footer for the first data chunk will have the transmit credits available
++information.
++
++The Ethernet frames that are typically transferred from MAC-PHY to SPI
++host will be sent as multiple receive data chunks. Each receive data
++chunk will have 64 bytes of data chunk payload followed by 4 bytes footer
++which contains the information needed to determine the validity and the
++location of the receive frame data within the 64 bytes data chunk payload.
++
++.. code-block:: none
++
++  +---------------------------------------------------+
++  |                     Rx Chunk                      |
++  | +----------------+  +---------------------------+ |   MISO
++  | | 4 bytes footer |  | 64 bytes chunk payload    | |------------>
++  | +----------------+  +---------------------------+ |
++  +---------------------------------------------------+
++
++4 bytes footer contains the below fields,
++
++EXST (Bit 31) - Extended Status. This bit is set when any bit in the
++                STATUS0 or STATUS1 registers are set and not masked.
++
++HDRB (Bit 30) - Received Header Bad. When set, indicates that the MAC-PHY
++                received a control or data header with a parity error.
++
++SYNC (Bit 29) - Configuration Synchronized flag. This bit reflects the
++                state of the SYNC bit in the CONFIG0 configuration
++                register (see Table 12). A zero indicates that the MAC-PHY
++                configuration may not be as expected by the SPI host.
++                Following configuration, the SPI host sets the
++                corresponding bitin the configuration register which is
++                reflected in this field.
++
++RCA (Bit 28..24) - Receive Chunks Available. The RCA field indicates to
++                   the SPI host the minimum number of additional receive
++                   data chunks of frame data that are available for
++                   reading beyond the current receive data chunk. This
++                   field is zero when there is no receive frame data
++                   pending in the MAC-PHY’s buffer for reading.
++
++VS (Bit 23..22) - Vendor Specific. These bits are implementation specific.
++                  If not implemented, the MAC-PHY shall set these bits to
++                  ‘0’.
++
++DV (Bit 21) - Data Valid flag. The MAC-PHY uses this bit to indicate
++              whether the current receive data chunk contains valid
++              receive frame data (DV = 1) or not (DV = 0). When ‘0’, the
++              SPI host shall ignore the chunk payload.
++
++SV (Bit 20) - Start Valid flag. The MAC-PHY sets this bit when the current
++              chunk payload contains the start of an Ethernet frame.
++              Otherwise, this bit is zero. The SV bit is not to be
++              confused with the Start-of-Frame Delimiter (SFD) byte
++              described in IEEE 802.3 [2].
++
++SWO (Bit 19..16) - Start Word Offset. When SV = 1, this field contains the
++                   32-bit word offset into the receive data chunk payload
++                   containing the first byte of a new received Ethernet
++                   frame. When a receive timestamp has been added to the
++                   beginning of the received Ethernet frame (RTSA = 1)
++                   then SWO points to the most significant byte of the
++                   timestamp. This field will be zero when SV = 0.
++
++FD (Bit 15) - Frame Drop. When set, this bit indicates that the MAC has
++              detected a condition for which the SPI host should drop the
++              received Ethernet frame. This bit is only valid at the end
++              of a received Ethernet frame (EV = 1) and shall be zero at
++              all other times.
++
++EV (Bit 14) - End Valid flag. The MAC-PHY sets this bit when the end of a
++              received Ethernet frame is present in this receive data
++              chunk payload.
++
++EBO (Bit 13..8) - End Byte Offset: When EV = 1, this field contains the
++                  byte offset into the receive data chunk payload that
++                  locates the last byte of the received Ethernet frame.
++                  This field is zero when EV = 0.
++
++RTSA (Bit 7) - Receive Timestamp Added. This bit is set when a 32-bit or
++               64-bit timestamp has been added to the beginning of the
++               received Ethernet frame. The MAC-PHY shall set this bit to
++               zero when SV = 0.
++
++RTSP (Bit 6) - Receive Timestamp Parity. Parity bit calculated over the
++               32-bit/64-bit timestamp added to the beginning of the
++               received Ethernet frame. Method used is odd parity. The
++               MAC-PHY shall set this bit to zero when RTSA = 0.
++
++TXC (Bit 5..1) - Transmit Credits. This field contains the minimum number
++                 of transmit data chunks of frame data that the SPI host
++                 can write in a single transaction without incurring a
++                 transmit buffer overflow error.
++
++P (Bit 0) - Parity. Parity bit calculated over the receive data footer.
++            Method used is odd parity.
++
++SPI host will initiate the data receive transaction based on the receive
++chunks available in the MAC-PHY which is provided in the receive chunk
++footer (RCA - Receive Chunks Available). SPI host will create data invalid
++transmit data chunks (empty chunks) or data valid transmit data chunks in
++case there are valid Ethernet frames to transmit to the MAC-PHY. The
++receive chunks available in MAC-PHY can be read either from the Buffer
++Status Register or footer.
++
++In case the previous data footer had no receive data chunks available and
++once the receive data chunks become available again for reading, the
++MAC-PHY interrupt is asserted to SPI host. On reception of the first data
++header this interrupt will be deasserted and the received footer for the
++first data chunk will have the receive chunks available information.
++
++MAC-PHY Interrupt
++~~~~~~~~~~~~~~~~~
++
++The MAC-PHY interrupt is asserted when the following conditions are met.
++
++Receive chunks available - This interrupt is asserted when the previous
++data footer had no receive data chunks available and once the receive
++data chunks become available for reading. On reception of the first data
++header this interrupt will be deasserted.
++
++Transmit chunk credits available - This interrupt is asserted when the
++previous data footer indicated no transmit credits available and once the
++transmit credits become available for transmitting transmit data chunks.
++On reception of the first data header this interrupt will be deasserted.
++
++Extended status event - This interrupt is asserted when the previous data
++footer indicated no extended status and once the extended event become
++available. In this case the host should read status #0 register to know
++the corresponding error/event. On reception of the first data header this
++interrupt will be deasserted.
++
++Control Transaction
++~~~~~~~~~~~~~~~~~~~
++
++4 bytes control header contains the below fields,
++
++DNC (Bit 31) - Data-Not-Control flag. This flag specifies the type of SPI
++               transaction. For control commands, this bit shall be ‘0’.
++               0 - Control command
++               1 - Data chunk
++
++HDRB (Bit 30) - Received Header Bad. When set by the MAC-PHY, indicates
++                that a header was received with a parity error. The SPI
++                host should always clear this bit. The MAC-PHY ignores the
++                HDRB value sent by the SPI host on MOSI.
++
++WNR (Bit 29) - Write-Not-Read. This bit indicates if data is to be written
++               to registers (when set) or read from registers
++               (when clear).
++
++AID (Bit 28) - Address Increment Disable. When clear, the address will be
++               automatically post-incremented by one following each
++               register read or write. When set, address auto increment is
++               disabled allowing successive reads and writes to occur at
++               the same register address.
++
++MMS (Bit 27..24) - Memory Map Selector. This field selects the specific
++                   register memory map to access.
++
++ADDR (Bit 23..8) - Address. Address of the first register within the
++                   selected memory map to access.
++
++LEN (Bit 7..1) - Length. Specifies the number of registers to read/write.
++                 This field is interpreted as the number of registers
++                 minus 1 allowing for up to 128 consecutive registers read
++                 or written starting at the address specified in ADDR. A
++                 length of zero shall read or write a single register.
++
++P (Bit 0) - Parity. Parity bit calculated over the control command header.
++            Method used is odd parity.
++
++Control transactions consist of one or more control commands. Control
++commands are used by the SPI host to read and write registers within the
++MAC-PHY. Each control commands are composed of a 4 bytes control command
++header followed by register write data in case of control write command.
++
++The MAC-PHY ignores the final 4 bytes of data from the SPI host at the end
++of the control write command. The control write command is also echoed
++from the MAC-PHY back to the SPI host to identify which register write
++failed in case of any bus errors. The echoed Control write command will
++have the first 4 bytes unused value to be ignored by the SPI host
++followed by 4 bytes echoed control header followed by echoed register
++write data. Control write commands can write either a single register or
++multiple consecutive registers. When multiple consecutive registers are
++written, the address is automatically post-incremented by the MAC-PHY.
++Writing to any unimplemented or undefined registers shall be ignored and
++yield no effect.
++
++The MAC-PHY ignores all data from the SPI host following the control
++header for the remainder of the control read command. The control read
++command is also echoed from the MAC-PHY back to the SPI host to identify
++which register read is failed in case of any bus errors. The echoed
++Control read command will have the first 4 bytes of unused value to be
++ignored by the SPI host followed by 4 bytes echoed control header followed
++by register read data. Control read commands can read either a single
++register or multiple consecutive registers. When multiple consecutive
++registers are read, the address is automatically post-incremented by the
++MAC-PHY. Reading any unimplemented or undefined registers shall return
++zero.
++
++Device drivers API
++==================
++
++The include/linux/oa_tc6.h defines the following functions:
++
++.. c:function:: struct oa_tc6 *oa_tc6_init(struct spi_device *spi,
++                                           struct net_device *netdev)
++
++Initialize OA TC6 lib.
++
++.. c:function:: void oa_tc6_exit(struct oa_tc6 *tc6)
++
++Free allocated OA TC6 lib.
++
++.. c:function:: int oa_tc6_write_register(struct oa_tc6 *tc6, u32 address,
++                                          u32 value)
++
++Write a single register in the MAC-PHY.
++
++.. c:function:: int oa_tc6_write_registers(struct oa_tc6 *tc6, u32 address,
++                                           u32 value[], u8 length)
++
++Writing multiple consecutive registers starting from @address in the MAC-PHY.
++Maximum of 128 consecutive registers can be written starting at @address.
++
++.. c:function:: int oa_tc6_read_register(struct oa_tc6 *tc6, u32 address,
++                                         u32 *value)
++
++Read a single register in the MAC-PHY.
++
++.. c:function:: int oa_tc6_read_registers(struct oa_tc6 *tc6, u32 address,
++                                          u32 value[], u8 length)
++
++Reading multiple consecutive registers starting from @address in the MAC-PHY.
++Maximum of 128 consecutive registers can be read starting at @address.
++
++.. c:function:: netdev_tx_t oa_tc6_start_xmit(struct oa_tc6 *tc6,
++                                              struct sk_buff *skb);
++
++The transmit Ethernet frame in the skb is or going to be transmitted through
++the MAC-PHY.
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 04e5f7c20e30..79fa7abb4ec9 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -16400,6 +16400,12 @@ L:	linux-rdma@vger.kernel.org
+ S:	Supported
+ F:	drivers/infiniband/ulp/opa_vnic
+ 
++OPEN ALLIANCE 10BASE-T1S MACPHY SERIAL INTERFACE FRAMEWORK
++M:	Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
++L:	netdev@vger.kernel.org
++S:	Maintained
++F:	Documentation/networking/oa-tc6-framework.rst
++
+ OPEN FIRMWARE AND FLATTENED DEVICE TREE
+ M:	Rob Herring <robh+dt@kernel.org>
+ M:	Frank Rowand <frowand.list@gmail.com>
+-- 
+2.34.1
+
+From git@z Thu Jan  1 00:00:00 1970
+Subject: [PATCH v4 2/12] net: ethernet: oa_tc6: implement register write
+ operation
+From: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Date: Thu, 18 Apr 2024 18:26:38 +0530
+Message-Id: <20240418125648.372526-3-Parthiban.Veerasooran@microchip.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Implement register write operation according to the control communication
+specified in the OPEN Alliance 10BASE-T1x MACPHY Serial Interface
+document. Control write commands are used by the SPI host to write
+registers within the MAC-PHY. Each control write commands are composed of
+a 32 bits control command header followed by register write data.
+
+The MAC-PHY ignores the final 32 bits of data from the SPI host at the
+end of the control write command. The write command and data is also
+echoed from the MAC-PHY back to the SPI host to enable the SPI host to
+identify which register write failed in the case of any bus errors.
+Control write commands can write either a single register or multiple
+consecutive registers. When multiple consecutive registers are written,
+the address is automatically post-incremented by the MAC-PHY. Writing to
+any unimplemented or undefined registers shall be ignored and yield no
+effect.
+
+Signed-off-by: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Reviewed-by: Andrew Lunn <andrew@lunn.ch>
+---
+ MAINTAINERS                   |   2 +
+ drivers/net/ethernet/Kconfig  |  11 ++
+ drivers/net/ethernet/Makefile |   1 +
+ drivers/net/ethernet/oa_tc6.c | 240 ++++++++++++++++++++++++++++++++++
+ include/linux/oa_tc6.h        |  17 +++
+ 5 files changed, 271 insertions(+)
+ create mode 100644 drivers/net/ethernet/oa_tc6.c
+ create mode 100644 include/linux/oa_tc6.h
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 79fa7abb4ec9..603528948f61 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -16405,6 +16405,8 @@ M:	Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
+ L:	netdev@vger.kernel.org
+ S:	Maintained
+ F:	Documentation/networking/oa-tc6-framework.rst
++F:	drivers/include/linux/oa_tc6.h
++F:	drivers/net/ethernet/oa_tc6.c
+ 
+ OPEN FIRMWARE AND FLATTENED DEVICE TREE
+ M:	Rob Herring <robh+dt@kernel.org>
+diff --git a/drivers/net/ethernet/Kconfig b/drivers/net/ethernet/Kconfig
+index 6a19b5393ed1..eb53372c60b4 100644
+--- a/drivers/net/ethernet/Kconfig
++++ b/drivers/net/ethernet/Kconfig
+@@ -157,6 +157,17 @@ config ETHOC
+ 	help
+ 	  Say Y here if you want to use the OpenCores 10/100 Mbps Ethernet MAC.
+ 
++config OA_TC6
++	tristate "OPEN Alliance TC6 10BASE-T1x MAC-PHY support"
++	depends on SPI
++	select PHYLIB
++	help
++	  This library implements OPEN Alliance TC6 10BASE-T1x MAC-PHY
++	  Serial Interface protocol for supporting 10BASE-T1x MAC-PHYs.
++
++	  To know the implementation details, refer documentation in
++	  <file:Documentation/networking/oa-tc6-framework.rst>.
++
+ source "drivers/net/ethernet/packetengines/Kconfig"
+ source "drivers/net/ethernet/pasemi/Kconfig"
+ source "drivers/net/ethernet/pensando/Kconfig"
+diff --git a/drivers/net/ethernet/Makefile b/drivers/net/ethernet/Makefile
+index 0d872d4efcd1..cf5487fc0761 100644
+--- a/drivers/net/ethernet/Makefile
++++ b/drivers/net/ethernet/Makefile
+@@ -104,3 +104,4 @@ obj-$(CONFIG_NET_VENDOR_XILINX) += xilinx/
+ obj-$(CONFIG_NET_VENDOR_XIRCOM) += xircom/
+ obj-$(CONFIG_NET_VENDOR_SYNOPSYS) += synopsys/
+ obj-$(CONFIG_NET_VENDOR_PENSANDO) += pensando/
++obj-$(CONFIG_OA_TC6) += oa_tc6.o
+diff --git a/drivers/net/ethernet/oa_tc6.c b/drivers/net/ethernet/oa_tc6.c
+new file mode 100644
+index 000000000000..a92337de4534
+--- /dev/null
++++ b/drivers/net/ethernet/oa_tc6.c
+@@ -0,0 +1,240 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * OPEN Alliance 10BASE‑T1x MAC‑PHY Serial Interface framework
++ *
++ * Author: Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
++ */
++
++#include <linux/bitfield.h>
++#include <linux/oa_tc6.h>
++
++/* Control command header */
++#define OA_TC6_CTRL_HEADER_DATA_NOT_CTRL	BIT(31)
++#define OA_TC6_CTRL_HEADER_WRITE_NOT_READ	BIT(29)
++#define OA_TC6_CTRL_HEADER_MEM_MAP_SELECTOR	GENMASK(27, 24)
++#define OA_TC6_CTRL_HEADER_ADDR			GENMASK(23, 8)
++#define OA_TC6_CTRL_HEADER_LENGTH		GENMASK(7, 1)
++#define OA_TC6_CTRL_HEADER_PARITY		BIT(0)
++
++#define OA_TC6_CTRL_HEADER_SIZE			4
++#define OA_TC6_CTRL_REG_VALUE_SIZE		4
++#define OA_TC6_CTRL_IGNORED_SIZE		4
++#define OA_TC6_CTRL_MAX_REGISTERS		128
++#define OA_TC6_CTRL_SPI_BUF_SIZE		(OA_TC6_CTRL_HEADER_SIZE +\
++						(OA_TC6_CTRL_MAX_REGISTERS *\
++						OA_TC6_CTRL_REG_VALUE_SIZE) +\
++						OA_TC6_CTRL_IGNORED_SIZE)
++
++/* Internal structure for MAC-PHY drivers */
++struct oa_tc6 {
++	struct spi_device *spi;
++	struct mutex spi_ctrl_lock; /* Protects spi control transfer */
++	void *spi_ctrl_tx_buf;
++	void *spi_ctrl_rx_buf;
++};
++
++enum oa_tc6_header_type {
++	OA_TC6_CTRL_HEADER,
++};
++
++enum oa_tc6_register_op {
++	OA_TC6_CTRL_REG_WRITE = 1,
++};
++
++static int oa_tc6_spi_transfer(struct oa_tc6 *tc6,
++			       enum oa_tc6_header_type header_type, u16 length)
++{
++	struct spi_transfer xfer = { 0 };
++	struct spi_message msg;
++
++	xfer.tx_buf = tc6->spi_ctrl_tx_buf;
++	xfer.rx_buf = tc6->spi_ctrl_rx_buf;
++	xfer.len = length;
++
++	spi_message_init(&msg);
++	spi_message_add_tail(&xfer, &msg);
++
++	return spi_sync(tc6->spi, &msg);
++}
++
++static int oa_tc6_get_parity(u32 p)
++{
++	/* Public domain code snippet, lifted from
++	 * http://www-graphics.stanford.edu/~seander/bithacks.html
++	 */
++	p ^= p >> 1;
++	p ^= p >> 2;
++	p = (p & 0x11111111U) * 0x11111111U;
++
++	/* Odd parity is used here */
++	return !((p >> 28) & 1);
++}
++
++static __be32 oa_tc6_prepare_ctrl_header(u32 address, u8 length,
++					 enum oa_tc6_register_op reg_op)
++{
++	u32 header;
++
++	header = FIELD_PREP(OA_TC6_CTRL_HEADER_DATA_NOT_CTRL,
++			    OA_TC6_CTRL_HEADER) |
++		 FIELD_PREP(OA_TC6_CTRL_HEADER_WRITE_NOT_READ, reg_op) |
++		 FIELD_PREP(OA_TC6_CTRL_HEADER_MEM_MAP_SELECTOR, address >> 16) |
++		 FIELD_PREP(OA_TC6_CTRL_HEADER_ADDR, address) |
++		 FIELD_PREP(OA_TC6_CTRL_HEADER_LENGTH, length - 1);
++	header |= FIELD_PREP(OA_TC6_CTRL_HEADER_PARITY,
++			     oa_tc6_get_parity(header));
++
++	return cpu_to_be32(header);
++}
++
++static void oa_tc6_update_ctrl_write_data(struct oa_tc6 *tc6, u32 value[],
++					  u8 length)
++{
++	__be32 *tx_buf = tc6->spi_ctrl_tx_buf + OA_TC6_CTRL_HEADER_SIZE;
++
++	for (int i = 0; i < length; i++)
++		*tx_buf++ = cpu_to_be32(value[i]);
++}
++
++static u16 oa_tc6_calculate_ctrl_buf_size(u8 length)
++{
++	/* Control command consists 4 bytes header + 4 bytes register value for
++	 * each register + 4 bytes ignored value.
++	 */
++	return OA_TC6_CTRL_HEADER_SIZE + OA_TC6_CTRL_REG_VALUE_SIZE * length +
++	       OA_TC6_CTRL_IGNORED_SIZE;
++}
++
++static void oa_tc6_prepare_ctrl_spi_buf(struct oa_tc6 *tc6, u32 address,
++					u32 value[], u8 length,
++					enum oa_tc6_register_op reg_op)
++{
++	__be32 *tx_buf = tc6->spi_ctrl_tx_buf;
++
++	*tx_buf = oa_tc6_prepare_ctrl_header(address, length, reg_op);
++
++	oa_tc6_update_ctrl_write_data(tc6, value, length);
++}
++
++static int oa_tc6_check_ctrl_write_reply(struct oa_tc6 *tc6, u8 size)
++{
++	u8 *tx_buf = tc6->spi_ctrl_tx_buf;
++	u8 *rx_buf = tc6->spi_ctrl_rx_buf;
++
++	rx_buf += OA_TC6_CTRL_IGNORED_SIZE;
++
++	/* The echoed control write must match with the one that was
++	 * transmitted.
++	 */
++	if (memcmp(tx_buf, rx_buf, size - OA_TC6_CTRL_IGNORED_SIZE))
++		return -EPROTO;
++
++	return 0;
++}
++
++static int oa_tc6_perform_ctrl(struct oa_tc6 *tc6, u32 address, u32 value[],
++			       u8 length, enum oa_tc6_register_op reg_op)
++{
++	u16 size;
++	int ret;
++
++	/* Prepare control command and copy to SPI control buffer */
++	oa_tc6_prepare_ctrl_spi_buf(tc6, address, value, length, reg_op);
++
++	size = oa_tc6_calculate_ctrl_buf_size(length);
++
++	/* Perform SPI transfer */
++	ret = oa_tc6_spi_transfer(tc6, OA_TC6_CTRL_HEADER, size);
++	if (ret) {
++		dev_err(&tc6->spi->dev, "SPI transfer failed for control: %d\n",
++			ret);
++		return ret;
++	}
++
++	/* Check echoed/received control write command reply for errors */
++	return oa_tc6_check_ctrl_write_reply(tc6, size);
++}
++
++/**
++ * oa_tc6_write_registers - function for writing multiple consecutive registers.
++ * @tc6: oa_tc6 struct.
++ * @address: address of the first register to be written in the MAC-PHY.
++ * @value: values to be written from the starting register address @address.
++ * @length: number of consecutive registers to be written from @address.
++ *
++ * Maximum of 128 consecutive registers can be written starting at @address.
++ *
++ * Returns 0 on success otherwise failed.
++ */
++int oa_tc6_write_registers(struct oa_tc6 *tc6, u32 address, u32 value[],
++			   u8 length)
++{
++	int ret;
++
++	if (!length || length > OA_TC6_CTRL_MAX_REGISTERS) {
++		dev_err(&tc6->spi->dev, "Invalid register length parameter\n");
++		return -EINVAL;
++	}
++
++	mutex_lock(&tc6->spi_ctrl_lock);
++	ret = oa_tc6_perform_ctrl(tc6, address, value, length,
++				  OA_TC6_CTRL_REG_WRITE);
++	mutex_unlock(&tc6->spi_ctrl_lock);
++
++	return ret;
++}
++EXPORT_SYMBOL_GPL(oa_tc6_write_registers);
++
++/**
++ * oa_tc6_write_register - function for writing a MAC-PHY register.
++ * @tc6: oa_tc6 struct.
++ * @address: register address of the MAC-PHY to be written.
++ * @value: value to be written in the @address register address of the MAC-PHY.
++ *
++ * Returns 0 on success otherwise failed.
++ */
++int oa_tc6_write_register(struct oa_tc6 *tc6, u32 address, u32 value)
++{
++	return oa_tc6_write_registers(tc6, address, &value, 1);
++}
++EXPORT_SYMBOL_GPL(oa_tc6_write_register);
++
++/**
++ * oa_tc6_init - allocates and initializes oa_tc6 structure.
++ * @spi: device with which data will be exchanged.
++ *
++ * Returns pointer reference to the oa_tc6 structure if the MAC-PHY
++ * initialization is successful otherwise NULL.
++ */
++struct oa_tc6 *oa_tc6_init(struct spi_device *spi)
++{
++	struct oa_tc6 *tc6;
++
++	tc6 = devm_kzalloc(&spi->dev, sizeof(*tc6), GFP_KERNEL);
++	if (!tc6)
++		return NULL;
++
++	tc6->spi = spi;
++	mutex_init(&tc6->spi_ctrl_lock);
++
++	/* Set the SPI controller to pump at realtime priority */
++	tc6->spi->rt = true;
++	spi_setup(tc6->spi);
++
++	tc6->spi_ctrl_tx_buf = devm_kzalloc(&tc6->spi->dev,
++					    OA_TC6_CTRL_SPI_BUF_SIZE, GFP_KERNEL);
++	if (!tc6->spi_ctrl_tx_buf)
++		return NULL;
++
++	tc6->spi_ctrl_rx_buf = devm_kzalloc(&tc6->spi->dev,
++					    OA_TC6_CTRL_SPI_BUF_SIZE, GFP_KERNEL);
++	if (!tc6->spi_ctrl_rx_buf)
++		return NULL;
++
++	return tc6;
++}
++EXPORT_SYMBOL_GPL(oa_tc6_init);
++
++MODULE_DESCRIPTION("OPEN Alliance 10BASE‑T1x MAC‑PHY Serial Interface Lib");
++MODULE_AUTHOR("Parthiban Veerasooran <parthiban.veerasooran@microchip.com>");
++MODULE_LICENSE("GPL");
+diff --git a/include/linux/oa_tc6.h b/include/linux/oa_tc6.h
+new file mode 100644
+index 000000000000..99c490f1c8a8
+--- /dev/null
++++ b/include/linux/oa_tc6.h
+@@ -0,0 +1,17 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * OPEN Alliance 10BASE‑T1x MAC‑PHY Serial Interface framework
++ *
++ * Link: https://opensig.org/download/document/OPEN_Alliance_10BASET1x_MAC-PHY_Serial_Interface_V1.1.pdf
++ *
++ * Author: Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
++ */
++
++#include <linux/spi/spi.h>
++
++struct oa_tc6;
++
++struct oa_tc6 *oa_tc6_init(struct spi_device *spi);
++int oa_tc6_write_register(struct oa_tc6 *tc6, u32 address, u32 value);
++int oa_tc6_write_registers(struct oa_tc6 *tc6, u32 address, u32 value[],
++			   u8 length);
+-- 
+2.34.1
+
+From git@z Thu Jan  1 00:00:00 1970
+Subject: [PATCH v4 3/12] net: ethernet: oa_tc6: implement register read
+ operation
+From: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Date: Thu, 18 Apr 2024 18:26:39 +0530
+Message-Id: <20240418125648.372526-4-Parthiban.Veerasooran@microchip.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Implement register read operation according to the control communication
+specified in the OPEN Alliance 10BASE-T1x MACPHY Serial Interface
+document. Control read commands are used by the SPI host to read
+registers within the MAC-PHY. Each control read commands are composed of
+a 32 bits control command header.
+
+The MAC-PHY ignores all data from the SPI host following the control
+header for the remainder of the control read command. Control read
+commands can read either a single register or multiple consecutive
+registers. When multiple consecutive registers are read, the address is
+automatically post-incremented by the MAC-PHY. Reading any unimplemented
+or undefined registers shall return zero.
+
+Signed-off-by: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+---
+ drivers/net/ethernet/oa_tc6.c | 84 ++++++++++++++++++++++++++++++++++-
+ include/linux/oa_tc6.h        |  3 ++
+ 2 files changed, 85 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/ethernet/oa_tc6.c b/drivers/net/ethernet/oa_tc6.c
+index a92337de4534..f563329912e2 100644
+--- a/drivers/net/ethernet/oa_tc6.c
++++ b/drivers/net/ethernet/oa_tc6.c
+@@ -38,6 +38,7 @@ enum oa_tc6_header_type {
+ };
+ 
+ enum oa_tc6_register_op {
++	OA_TC6_CTRL_REG_READ = 0,
+ 	OA_TC6_CTRL_REG_WRITE = 1,
+ };
+ 
+@@ -113,7 +114,8 @@ static void oa_tc6_prepare_ctrl_spi_buf(struct oa_tc6 *tc6, u32 address,
+ 
+ 	*tx_buf = oa_tc6_prepare_ctrl_header(address, length, reg_op);
+ 
+-	oa_tc6_update_ctrl_write_data(tc6, value, length);
++	if (reg_op == OA_TC6_CTRL_REG_WRITE)
++		oa_tc6_update_ctrl_write_data(tc6, value, length);
+ }
+ 
+ static int oa_tc6_check_ctrl_write_reply(struct oa_tc6 *tc6, u8 size)
+@@ -132,6 +134,30 @@ static int oa_tc6_check_ctrl_write_reply(struct oa_tc6 *tc6, u8 size)
+ 	return 0;
+ }
+ 
++static int oa_tc6_check_ctrl_read_reply(struct oa_tc6 *tc6, u8 size)
++{
++	u32 *tx_buf = tc6->spi_ctrl_tx_buf;
++	u32 *rx_buf = tc6->spi_ctrl_rx_buf + OA_TC6_CTRL_IGNORED_SIZE;
++
++	/* The echoed control read header must match with the one that was
++	 * transmitted.
++	 */
++	if (*tx_buf != *rx_buf)
++		return -EPROTO;
++
++	return 0;
++}
++
++static void oa_tc6_copy_ctrl_read_data(struct oa_tc6 *tc6, u32 value[],
++				       u8 length)
++{
++	__be32 *rx_buf = tc6->spi_ctrl_rx_buf + OA_TC6_CTRL_IGNORED_SIZE +
++			 OA_TC6_CTRL_HEADER_SIZE;
++
++	for (int i = 0; i < length; i++)
++		value[i] = be32_to_cpu(*rx_buf++);
++}
++
+ static int oa_tc6_perform_ctrl(struct oa_tc6 *tc6, u32 address, u32 value[],
+ 			       u8 length, enum oa_tc6_register_op reg_op)
+ {
+@@ -152,8 +178,62 @@ static int oa_tc6_perform_ctrl(struct oa_tc6 *tc6, u32 address, u32 value[],
+ 	}
+ 
+ 	/* Check echoed/received control write command reply for errors */
+-	return oa_tc6_check_ctrl_write_reply(tc6, size);
++	if (reg_op == OA_TC6_CTRL_REG_WRITE)
++		return oa_tc6_check_ctrl_write_reply(tc6, size);
++
++	/* Check echoed/received control read command reply for errors */
++	ret = oa_tc6_check_ctrl_read_reply(tc6, size);
++	if (ret)
++		return ret;
++
++	oa_tc6_copy_ctrl_read_data(tc6, value, length);
++
++	return 0;
++}
++
++/**
++ * oa_tc6_read_registers - function for reading multiple consecutive registers.
++ * @tc6: oa_tc6 struct.
++ * @address: address of the first register to be read in the MAC-PHY.
++ * @value: values to be read from the starting register address @address.
++ * @length: number of consecutive registers to be read from @address.
++ *
++ * Maximum of 128 consecutive registers can be read starting at @address.
++ *
++ * Returns 0 on success otherwise failed.
++ */
++int oa_tc6_read_registers(struct oa_tc6 *tc6, u32 address, u32 value[],
++			  u8 length)
++{
++	int ret;
++
++	if (!length || length > OA_TC6_CTRL_MAX_REGISTERS) {
++		dev_err(&tc6->spi->dev, "Invalid register length parameter\n");
++		return -EINVAL;
++	}
++
++	mutex_lock(&tc6->spi_ctrl_lock);
++	ret = oa_tc6_perform_ctrl(tc6, address, value, length,
++				  OA_TC6_CTRL_REG_READ);
++	mutex_unlock(&tc6->spi_ctrl_lock);
++
++	return ret;
++}
++EXPORT_SYMBOL_GPL(oa_tc6_read_registers);
++
++/**
++ * oa_tc6_read_register - function for reading a MAC-PHY register.
++ * @tc6: oa_tc6 struct.
++ * @address: register address of the MAC-PHY to be read.
++ * @value: value read from the @address register address of the MAC-PHY.
++ *
++ * Returns 0 on success otherwise failed.
++ */
++int oa_tc6_read_register(struct oa_tc6 *tc6, u32 address, u32 *value)
++{
++	return oa_tc6_read_registers(tc6, address, value, 1);
+ }
++EXPORT_SYMBOL_GPL(oa_tc6_read_register);
+ 
+ /**
+  * oa_tc6_write_registers - function for writing multiple consecutive registers.
+diff --git a/include/linux/oa_tc6.h b/include/linux/oa_tc6.h
+index 99c490f1c8a8..85aeecf87306 100644
+--- a/include/linux/oa_tc6.h
++++ b/include/linux/oa_tc6.h
+@@ -15,3 +15,6 @@ struct oa_tc6 *oa_tc6_init(struct spi_device *spi);
+ int oa_tc6_write_register(struct oa_tc6 *tc6, u32 address, u32 value);
+ int oa_tc6_write_registers(struct oa_tc6 *tc6, u32 address, u32 value[],
+ 			   u8 length);
++int oa_tc6_read_register(struct oa_tc6 *tc6, u32 address, u32 *value);
++int oa_tc6_read_registers(struct oa_tc6 *tc6, u32 address, u32 value[],
++			  u8 length);
+-- 
+2.34.1
+
+From git@z Thu Jan  1 00:00:00 1970
+Subject: [PATCH v4 4/12] net: ethernet: oa_tc6: implement software reset
+From: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Date: Thu, 18 Apr 2024 18:26:40 +0530
+Message-Id: <20240418125648.372526-5-Parthiban.Veerasooran@microchip.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Reset complete bit is set when the MAC-PHY reset completes and ready for
+configuration. Additionally reset complete bit in the STS0 register has
+to be written by one upon reset complete to clear the interrupt.
+
+Signed-off-by: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+---
+ drivers/net/ethernet/oa_tc6.c | 53 +++++++++++++++++++++++++++++++++++
+ 1 file changed, 53 insertions(+)
+
+diff --git a/drivers/net/ethernet/oa_tc6.c b/drivers/net/ethernet/oa_tc6.c
+index f563329912e2..4b0f63c02c35 100644
+--- a/drivers/net/ethernet/oa_tc6.c
++++ b/drivers/net/ethernet/oa_tc6.c
+@@ -6,8 +6,18 @@
+  */
+ 
+ #include <linux/bitfield.h>
++#include <linux/iopoll.h>
+ #include <linux/oa_tc6.h>
+ 
++/* OPEN Alliance TC6 registers */
++/* Reset Control and Status Register */
++#define OA_TC6_REG_RESET			0x0003
++#define RESET_SWRESET				BIT(0)	/* Software Reset */
++
++/* Status Register #0 */
++#define OA_TC6_REG_STATUS0			0x0008
++#define STATUS0_RESETC				BIT(6)	/* Reset Complete */
++
+ /* Control command header */
+ #define OA_TC6_CTRL_HEADER_DATA_NOT_CTRL	BIT(31)
+ #define OA_TC6_CTRL_HEADER_WRITE_NOT_READ	BIT(29)
+@@ -24,6 +34,8 @@
+ 						(OA_TC6_CTRL_MAX_REGISTERS *\
+ 						OA_TC6_CTRL_REG_VALUE_SIZE) +\
+ 						OA_TC6_CTRL_IGNORED_SIZE)
++#define STATUS0_RESETC_POLL_DELAY		1000
++#define STATUS0_RESETC_POLL_TIMEOUT		1000000
+ 
+ /* Internal structure for MAC-PHY drivers */
+ struct oa_tc6 {
+@@ -279,6 +291,39 @@ int oa_tc6_write_register(struct oa_tc6 *tc6, u32 address, u32 value)
+ }
+ EXPORT_SYMBOL_GPL(oa_tc6_write_register);
+ 
++static int oa_tc6_read_status0(struct oa_tc6 *tc6)
++{
++	u32 regval;
++	int ret;
++
++	ret = oa_tc6_read_register(tc6, OA_TC6_REG_STATUS0, &regval);
++	if (ret)
++		return 0;
++
++	return regval;
++}
++
++static int oa_tc6_sw_reset_macphy(struct oa_tc6 *tc6)
++{
++	u32 regval = RESET_SWRESET;
++	int ret;
++
++	ret = oa_tc6_write_register(tc6, OA_TC6_REG_RESET, regval);
++	if (ret)
++		return ret;
++
++	/* Poll for soft reset complete for every 1ms until 1s timeout */
++	ret = readx_poll_timeout(oa_tc6_read_status0, tc6, regval,
++				 regval & STATUS0_RESETC,
++				 STATUS0_RESETC_POLL_DELAY,
++				 STATUS0_RESETC_POLL_TIMEOUT);
++	if (ret)
++		return -ENODEV;
++
++	/* Clear the reset complete status */
++	return oa_tc6_write_register(tc6, OA_TC6_REG_STATUS0, regval);
++}
++
+ /**
+  * oa_tc6_init - allocates and initializes oa_tc6 structure.
+  * @spi: device with which data will be exchanged.
+@@ -289,6 +334,7 @@ EXPORT_SYMBOL_GPL(oa_tc6_write_register);
+ struct oa_tc6 *oa_tc6_init(struct spi_device *spi)
+ {
+ 	struct oa_tc6 *tc6;
++	int ret;
+ 
+ 	tc6 = devm_kzalloc(&spi->dev, sizeof(*tc6), GFP_KERNEL);
+ 	if (!tc6)
+@@ -311,6 +357,13 @@ struct oa_tc6 *oa_tc6_init(struct spi_device *spi)
+ 	if (!tc6->spi_ctrl_rx_buf)
+ 		return NULL;
+ 
++	ret = oa_tc6_sw_reset_macphy(tc6);
++	if (ret) {
++		dev_err(&tc6->spi->dev,
++			"MAC-PHY software reset failed: %d\n", ret);
++		return NULL;
++	}
++
+ 	return tc6;
+ }
+ EXPORT_SYMBOL_GPL(oa_tc6_init);
+-- 
+2.34.1
+
+From git@z Thu Jan  1 00:00:00 1970
+Subject: [PATCH v4 5/12] net: ethernet: oa_tc6: implement error interrupts
+ unmasking
+From: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Date: Thu, 18 Apr 2024 18:26:41 +0530
+Message-Id: <20240418125648.372526-6-Parthiban.Veerasooran@microchip.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+This will unmask the following error interrupts from the MAC-PHY.
+  tx protocol error
+  rx buffer overflow error
+  loss of framing error
+  header error
+The MAC-PHY will signal an error by setting the EXST bit in the receive
+data footer which will then allow the host to read the STATUS0 register
+to find the source of the error.
+
+Signed-off-by: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Reviewed-by: Andrew Lunn <andrew@lunn.ch>
+---
+ drivers/net/ethernet/oa_tc6.c | 31 +++++++++++++++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/drivers/net/ethernet/oa_tc6.c b/drivers/net/ethernet/oa_tc6.c
+index 4b0f63c02c35..850765574d30 100644
+--- a/drivers/net/ethernet/oa_tc6.c
++++ b/drivers/net/ethernet/oa_tc6.c
+@@ -18,6 +18,13 @@
+ #define OA_TC6_REG_STATUS0			0x0008
+ #define STATUS0_RESETC				BIT(6)	/* Reset Complete */
+ 
++/* Interrupt Mask Register #0 */
++#define OA_TC6_REG_INT_MASK0			0x000C
++#define INT_MASK0_HEADER_ERR_MASK		BIT(5)
++#define INT_MASK0_LOSS_OF_FRAME_ERR_MASK	BIT(4)
++#define INT_MASK0_RX_BUFFER_OVERFLOW_ERR_MASK	BIT(3)
++#define INT_MASK0_TX_PROTOCOL_ERR_MASK		BIT(0)
++
+ /* Control command header */
+ #define OA_TC6_CTRL_HEADER_DATA_NOT_CTRL	BIT(31)
+ #define OA_TC6_CTRL_HEADER_WRITE_NOT_READ	BIT(29)
+@@ -324,6 +331,23 @@ static int oa_tc6_sw_reset_macphy(struct oa_tc6 *tc6)
+ 	return oa_tc6_write_register(tc6, OA_TC6_REG_STATUS0, regval);
+ }
+ 
++static int oa_tc6_unmask_macphy_error_interrupts(struct oa_tc6 *tc6)
++{
++	u32 regval;
++	int ret;
++
++	ret = oa_tc6_read_register(tc6, OA_TC6_REG_INT_MASK0, &regval);
++	if (ret)
++		return ret;
++
++	regval &= ~(INT_MASK0_TX_PROTOCOL_ERR_MASK |
++		    INT_MASK0_RX_BUFFER_OVERFLOW_ERR_MASK |
++		    INT_MASK0_LOSS_OF_FRAME_ERR_MASK |
++		    INT_MASK0_HEADER_ERR_MASK);
++
++	return oa_tc6_write_register(tc6, OA_TC6_REG_INT_MASK0, regval);
++}
++
+ /**
+  * oa_tc6_init - allocates and initializes oa_tc6 structure.
+  * @spi: device with which data will be exchanged.
+@@ -364,6 +388,13 @@ struct oa_tc6 *oa_tc6_init(struct spi_device *spi)
+ 		return NULL;
+ 	}
+ 
++	ret = oa_tc6_unmask_macphy_error_interrupts(tc6);
++	if (ret) {
++		dev_err(&tc6->spi->dev,
++			"MAC-PHY error interrupts unmask failed: %d\n", ret);
++		return NULL;
++	}
++
+ 	return tc6;
+ }
+ EXPORT_SYMBOL_GPL(oa_tc6_init);
+-- 
+2.34.1
+
+From git@z Thu Jan  1 00:00:00 1970
+Subject: [PATCH v4 6/12] net: ethernet: oa_tc6: implement internal PHY
+ initialization
+From: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Date: Thu, 18 Apr 2024 18:26:42 +0530
+Message-Id: <20240418125648.372526-7-Parthiban.Veerasooran@microchip.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Internal PHY is initialized as per the PHY register capability supported
+by the MAC-PHY. Direct PHY Register Access Capability indicates if PHY
+registers are directly accessible within the SPI register memory space.
+Indirect PHY Register Access Capability indicates if PHY registers are
+indirectly accessible through the MDIO/MDC registers MDIOACCn defined in
+OPEN Alliance specification. Currently the direct register access is only
+supported.
+
+Signed-off-by: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+---
+ drivers/net/ethernet/oa_tc6.c   | 230 +++++++++++++++++++++++++++++++-
+ drivers/net/phy/microchip_t1s.c |  30 +++++
+ include/linux/oa_tc6.h          |   4 +-
+ include/uapi/linux/mdio.h       |   1 +
+ 4 files changed, 263 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/ethernet/oa_tc6.c b/drivers/net/ethernet/oa_tc6.c
+index 850765574d30..f04c4c13e8d3 100644
+--- a/drivers/net/ethernet/oa_tc6.c
++++ b/drivers/net/ethernet/oa_tc6.c
+@@ -7,9 +7,15 @@
+ 
+ #include <linux/bitfield.h>
+ #include <linux/iopoll.h>
++#include <linux/mdio.h>
++#include <linux/phy.h>
+ #include <linux/oa_tc6.h>
+ 
+ /* OPEN Alliance TC6 registers */
++/* Standard Capabilities Register */
++#define OA_TC6_REG_STDCAP			0x0002
++#define STDCAP_DIRECT_PHY_REG_ACCESS		BIT(8)
++
+ /* Reset Control and Status Register */
+ #define OA_TC6_REG_RESET			0x0003
+ #define RESET_SWRESET				BIT(0)	/* Software Reset */
+@@ -25,6 +31,10 @@
+ #define INT_MASK0_RX_BUFFER_OVERFLOW_ERR_MASK	BIT(3)
+ #define INT_MASK0_TX_PROTOCOL_ERR_MASK		BIT(0)
+ 
++/* PHY Clause 22 and 29 registers base address and mask */
++#define OA_TC6_PHY_STD_REG_ADDR_BASE		0xFF00
++#define OA_TC6_PHY_STD_REG_ADDR_MASK		0x3F
++
+ /* Control command header */
+ #define OA_TC6_CTRL_HEADER_DATA_NOT_CTRL	BIT(31)
+ #define OA_TC6_CTRL_HEADER_WRITE_NOT_READ	BIT(29)
+@@ -33,6 +43,15 @@
+ #define OA_TC6_CTRL_HEADER_LENGTH		GENMASK(7, 1)
+ #define OA_TC6_CTRL_HEADER_PARITY		BIT(0)
+ 
++/* PHY – Clause 45 registers memory map selector (MMS) as per table 6 in the
++ * OPEN Alliance specification.
++ */
++#define OA_TC6_PHY_C45_PCS_MMS2			2	/* MMD 3 */
++#define OA_TC6_PHY_C45_PMA_PMD_MMS3		3	/* MMD 1 */
++#define OA_TC6_PHY_C45_VS_PLCA_MMS4		4	/* MMD 31 */
++#define OA_TC6_PHY_C45_AUTO_NEG_MMS5		5	/* MMD 7 */
++#define OA_TC6_PHY_C45_POWER_UNIT_MMS6		6	/* MMD 13 */
++
+ #define OA_TC6_CTRL_HEADER_SIZE			4
+ #define OA_TC6_CTRL_REG_VALUE_SIZE		4
+ #define OA_TC6_CTRL_IGNORED_SIZE		4
+@@ -46,6 +65,10 @@
+ 
+ /* Internal structure for MAC-PHY drivers */
+ struct oa_tc6 {
++	struct device *dev;
++	struct net_device *netdev;
++	struct phy_device *phydev;
++	struct mii_bus *mdiobus;
+ 	struct spi_device *spi;
+ 	struct mutex spi_ctrl_lock; /* Protects spi control transfer */
+ 	void *spi_ctrl_tx_buf;
+@@ -298,6 +321,191 @@ int oa_tc6_write_register(struct oa_tc6 *tc6, u32 address, u32 value)
+ }
+ EXPORT_SYMBOL_GPL(oa_tc6_write_register);
+ 
++static int oa_tc6_check_phy_reg_direct_access_capability(struct oa_tc6 *tc6)
++{
++	u32 regval;
++	int ret;
++
++	ret = oa_tc6_read_register(tc6, OA_TC6_REG_STDCAP, &regval);
++	if (ret)
++		return ret;
++
++	if (!(regval & STDCAP_DIRECT_PHY_REG_ACCESS))
++		return -ENODEV;
++
++	return 0;
++}
++
++static void oa_tc6_handle_link_change(struct net_device *netdev)
++{
++	phy_print_status(netdev->phydev);
++}
++
++static int oa_tc6_mdiobus_read(struct mii_bus *bus, int addr, int regnum)
++{
++	struct oa_tc6 *tc6 = bus->priv;
++	u32 regval;
++	bool ret;
++
++	ret = oa_tc6_read_register(tc6, OA_TC6_PHY_STD_REG_ADDR_BASE |
++				   (regnum & OA_TC6_PHY_STD_REG_ADDR_MASK),
++				   &regval);
++	if (ret)
++		return -ENODEV;
++
++	return regval;
++}
++
++static int oa_tc6_mdiobus_write(struct mii_bus *bus, int addr, int regnum,
++				u16 val)
++{
++	struct oa_tc6 *tc6 = bus->priv;
++
++	return oa_tc6_write_register(tc6, OA_TC6_PHY_STD_REG_ADDR_BASE |
++				     (regnum & OA_TC6_PHY_STD_REG_ADDR_MASK),
++				     val);
++}
++
++static int oa_tc6_get_phy_c45_mms(int devnum)
++{
++	switch (devnum) {
++	case MDIO_MMD_PCS:
++		return OA_TC6_PHY_C45_PCS_MMS2;
++	case MDIO_MMD_PMAPMD:
++		return OA_TC6_PHY_C45_PMA_PMD_MMS3;
++	case MDIO_MMD_VEND2:
++		return OA_TC6_PHY_C45_VS_PLCA_MMS4;
++	case MDIO_MMD_AN:
++		return OA_TC6_PHY_C45_AUTO_NEG_MMS5;
++	case MDIO_MMD_POWER_UNIT:
++		return OA_TC6_PHY_C45_POWER_UNIT_MMS6;
++	default:
++		return -EOPNOTSUPP;
++	}
++}
++
++static int oa_tc6_mdiobus_read_c45(struct mii_bus *bus, int addr, int devnum,
++				   int regnum)
++{
++	struct oa_tc6 *tc6 = bus->priv;
++	u32 regval;
++	int ret;
++
++	ret = oa_tc6_get_phy_c45_mms(devnum);
++	if (ret < 0)
++		return ret;
++
++	ret = oa_tc6_read_register(tc6, (ret << 16) | regnum, &regval);
++	if (ret)
++		return ret;
++
++	return regval;
++}
++
++static int oa_tc6_mdiobus_write_c45(struct mii_bus *bus, int addr, int devnum,
++				    int regnum, u16 val)
++{
++	struct oa_tc6 *tc6 = bus->priv;
++	int ret;
++
++	ret = oa_tc6_get_phy_c45_mms(devnum);
++	if (ret < 0)
++		return ret;
++
++	return oa_tc6_write_register(tc6, (ret << 16) | regnum, val);
++}
++
++static int oa_tc6_mdiobus_register(struct oa_tc6 *tc6)
++{
++	int ret;
++
++	tc6->mdiobus = mdiobus_alloc();
++	if (!tc6->mdiobus) {
++		netdev_err(tc6->netdev, "MDIO bus alloc failed\n");
++		return -ENOMEM;
++	}
++
++	tc6->mdiobus->priv = tc6;
++	tc6->mdiobus->read = oa_tc6_mdiobus_read;
++	tc6->mdiobus->write = oa_tc6_mdiobus_write;
++	/* OPEN Alliance 10BASE-T1x compliance MAC-PHYs will have both C22 and
++	 * C45 registers space. If the PHY is discovered via C22 bus protocol it
++	 * assumes it uses C22 protocol and always uses C22 registers indirect
++	 * access to access C45 registers. This is because, we don't have a
++	 * clean separation between C22/C45 register space and C22/C45 MDIO bus
++	 * protocols. Resulting, PHY C45 registers direct access can't be used
++	 * which can save multiple SPI bus access. To support this feature, PHY
++	 * drivers can set .read_mmd/.write_mmd in the PHY driver to call
++	 * .read_c45/.write_c45. Ex: drivers/net/phy/microchip_t1s.c
++	 */
++	tc6->mdiobus->read_c45 = oa_tc6_mdiobus_read_c45;
++	tc6->mdiobus->write_c45 = oa_tc6_mdiobus_write_c45;
++	tc6->mdiobus->name = "oa-tc6-mdiobus";
++	tc6->mdiobus->parent = tc6->dev;
++
++	snprintf(tc6->mdiobus->id, ARRAY_SIZE(tc6->mdiobus->id), "%s",
++		 dev_name(&tc6->spi->dev));
++
++	ret = mdiobus_register(tc6->mdiobus);
++	if (ret) {
++		netdev_err(tc6->netdev, "Could not register MDIO bus\n");
++		mdiobus_free(tc6->mdiobus);
++		return ret;
++	}
++
++	return 0;
++}
++
++static void oa_tc6_mdiobus_unregister(struct oa_tc6 *tc6)
++{
++	mdiobus_unregister(tc6->mdiobus);
++	mdiobus_free(tc6->mdiobus);
++}
++
++static int oa_tc6_phy_init(struct oa_tc6 *tc6)
++{
++	int ret;
++
++	ret = oa_tc6_check_phy_reg_direct_access_capability(tc6);
++	if (ret) {
++		netdev_err(tc6->netdev,
++			   "Direct PHY register access is not supported by the MAC-PHY\n");
++		return ret;
++	}
++
++	ret = oa_tc6_mdiobus_register(tc6);
++	if (ret)
++		return ret;
++
++	tc6->phydev = phy_find_first(tc6->mdiobus);
++	if (!tc6->phydev) {
++		netdev_err(tc6->netdev, "No PHY found\n");
++		oa_tc6_mdiobus_unregister(tc6);
++		return -ENODEV;
++	}
++
++	tc6->phydev->is_internal = true;
++	ret = phy_connect_direct(tc6->netdev, tc6->phydev,
++				 &oa_tc6_handle_link_change,
++				 PHY_INTERFACE_MODE_INTERNAL);
++	if (ret) {
++		netdev_err(tc6->netdev, "Can't attach PHY to %s\n",
++			   tc6->mdiobus->id);
++		oa_tc6_mdiobus_unregister(tc6);
++		return ret;
++	}
++
++	phy_attached_info(tc6->netdev->phydev);
++
++	return 0;
++}
++
++static void oa_tc6_phy_exit(struct oa_tc6 *tc6)
++{
++	phy_disconnect(tc6->phydev);
++	oa_tc6_mdiobus_unregister(tc6);
++}
++
+ static int oa_tc6_read_status0(struct oa_tc6 *tc6)
+ {
+ 	u32 regval;
+@@ -351,11 +559,12 @@ static int oa_tc6_unmask_macphy_error_interrupts(struct oa_tc6 *tc6)
+ /**
+  * oa_tc6_init - allocates and initializes oa_tc6 structure.
+  * @spi: device with which data will be exchanged.
++ * @netdev: network device interface structure.
+  *
+  * Returns pointer reference to the oa_tc6 structure if the MAC-PHY
+  * initialization is successful otherwise NULL.
+  */
+-struct oa_tc6 *oa_tc6_init(struct spi_device *spi)
++struct oa_tc6 *oa_tc6_init(struct spi_device *spi, struct net_device *netdev)
+ {
+ 	struct oa_tc6 *tc6;
+ 	int ret;
+@@ -365,6 +574,8 @@ struct oa_tc6 *oa_tc6_init(struct spi_device *spi)
+ 		return NULL;
+ 
+ 	tc6->spi = spi;
++	tc6->netdev = netdev;
++	SET_NETDEV_DEV(netdev, &spi->dev);
+ 	mutex_init(&tc6->spi_ctrl_lock);
+ 
+ 	/* Set the SPI controller to pump at realtime priority */
+@@ -395,10 +606,27 @@ struct oa_tc6 *oa_tc6_init(struct spi_device *spi)
+ 		return NULL;
+ 	}
+ 
++	ret = oa_tc6_phy_init(tc6);
++	if (ret) {
++		dev_err(&tc6->spi->dev,
++			"MAC internal PHY initialization failed: %d\n", ret);
++		return NULL;
++	}
++
+ 	return tc6;
+ }
+ EXPORT_SYMBOL_GPL(oa_tc6_init);
+ 
++/**
++ * oa_tc6_exit - exit function.
++ * @tc6: oa_tc6 struct.
++ */
++void oa_tc6_exit(struct oa_tc6 *tc6)
++{
++	oa_tc6_phy_exit(tc6);
++}
++EXPORT_SYMBOL_GPL(oa_tc6_exit);
++
+ MODULE_DESCRIPTION("OPEN Alliance 10BASE‑T1x MAC‑PHY Serial Interface Lib");
+ MODULE_AUTHOR("Parthiban Veerasooran <parthiban.veerasooran@microchip.com>");
+ MODULE_LICENSE("GPL");
+diff --git a/drivers/net/phy/microchip_t1s.c b/drivers/net/phy/microchip_t1s.c
+index 534ca7d1b061..769a88254285 100644
+--- a/drivers/net/phy/microchip_t1s.c
++++ b/drivers/net/phy/microchip_t1s.c
+@@ -268,6 +268,34 @@ static int lan86xx_read_status(struct phy_device *phydev)
+ 	return 0;
+ }
+ 
++/* OPEN Alliance 10BASE-T1x compliance MAC-PHYs will have both C22 and
++ * C45 registers space. If the PHY is discovered via C22 bus protocol it assumes
++ * it uses C22 protocol and always uses C22 registers indirect access to access
++ * C45 registers. This is because, we don't have a clean separation between
++ * C22/C45 register space and C22/C45 MDIO bus protocols. Resulting, PHY C45
++ * registers direct access can't be used which can save multiple SPI bus access.
++ * To support this feature, set .read_mmd/.write_mmd in the PHY driver to call
++ * .read_c45/.write_c45 in the OPEN Alliance framework
++ * drivers/net/ethernet/oa_tc6.c
++ */
++static int lan865x_phy_read_mmd(struct phy_device *phydev, int devnum,
++				u16 regnum)
++{
++	struct mii_bus *bus = phydev->mdio.bus;
++	int addr = phydev->mdio.addr;
++
++	return bus->read_c45(bus, addr, devnum, regnum);
++}
++
++static int lan865x_phy_write_mmd(struct phy_device *phydev, int devnum,
++				 u16 regnum, u16 val)
++{
++	struct mii_bus *bus = phydev->mdio.bus;
++	int addr = phydev->mdio.addr;
++
++	return bus->write_c45(bus, addr, devnum, regnum, val);
++}
++
+ static struct phy_driver microchip_t1s_driver[] = {
+ 	{
+ 		PHY_ID_MATCH_EXACT(PHY_ID_LAN867X_REVB1),
+@@ -285,6 +313,8 @@ static struct phy_driver microchip_t1s_driver[] = {
+ 		.features           = PHY_BASIC_T1S_P2MP_FEATURES,
+ 		.config_init        = lan865x_revb0_config_init,
+ 		.read_status        = lan86xx_read_status,
++		.read_mmd           = lan865x_phy_read_mmd,
++		.write_mmd          = lan865x_phy_write_mmd,
+ 		.get_plca_cfg	    = genphy_c45_plca_get_cfg,
+ 		.set_plca_cfg	    = genphy_c45_plca_set_cfg,
+ 		.get_plca_status    = genphy_c45_plca_get_status,
+diff --git a/include/linux/oa_tc6.h b/include/linux/oa_tc6.h
+index 85aeecf87306..606ba9f1e663 100644
+--- a/include/linux/oa_tc6.h
++++ b/include/linux/oa_tc6.h
+@@ -7,11 +7,13 @@
+  * Author: Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
+  */
+ 
++#include <linux/etherdevice.h>
+ #include <linux/spi/spi.h>
+ 
+ struct oa_tc6;
+ 
+-struct oa_tc6 *oa_tc6_init(struct spi_device *spi);
++struct oa_tc6 *oa_tc6_init(struct spi_device *spi, struct net_device *netdev);
++void oa_tc6_exit(struct oa_tc6 *tc6);
+ int oa_tc6_write_register(struct oa_tc6 *tc6, u32 address, u32 value);
+ int oa_tc6_write_registers(struct oa_tc6 *tc6, u32 address, u32 value[],
+ 			   u8 length);
+diff --git a/include/uapi/linux/mdio.h b/include/uapi/linux/mdio.h
+index c0c8ec995b06..f0d3f268240d 100644
+--- a/include/uapi/linux/mdio.h
++++ b/include/uapi/linux/mdio.h
+@@ -23,6 +23,7 @@
+ #define MDIO_MMD_DTEXS		5	/* DTE Extender Sublayer */
+ #define MDIO_MMD_TC		6	/* Transmission Convergence */
+ #define MDIO_MMD_AN		7	/* Auto-Negotiation */
++#define MDIO_MMD_POWER_UNIT	13	/* PHY Power Unit */
+ #define MDIO_MMD_C22EXT		29	/* Clause 22 extension */
+ #define MDIO_MMD_VEND1		30	/* Vendor specific 1 */
+ #define MDIO_MMD_VEND2		31	/* Vendor specific 2 */
+-- 
+2.34.1
+
+From git@z Thu Jan  1 00:00:00 1970
+Subject: [PATCH v4 7/12] net: ethernet: oa_tc6: enable open alliance tc6
+ data communication
+From: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Date: Thu, 18 Apr 2024 18:26:43 +0530
+Message-Id: <20240418125648.372526-8-Parthiban.Veerasooran@microchip.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Enabling Configuration Synchronization bit (SYNC) in the Configuration
+Register #0 enables data communication in the MAC-PHY. The state of this
+bit is reflected in the data footer SYNC bit.
+
+Signed-off-by: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Reviewed-by: Andrew Lunn <andrew@lunn.ch>
+---
+ drivers/net/ethernet/oa_tc6.c | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/drivers/net/ethernet/oa_tc6.c b/drivers/net/ethernet/oa_tc6.c
+index f04c4c13e8d3..ef7069618319 100644
+--- a/drivers/net/ethernet/oa_tc6.c
++++ b/drivers/net/ethernet/oa_tc6.c
+@@ -20,6 +20,10 @@
+ #define OA_TC6_REG_RESET			0x0003
+ #define RESET_SWRESET				BIT(0)	/* Software Reset */
+ 
++/* Configuration Register #0 */
++#define OA_TC6_REG_CONFIG0			0x0004
++#define CONFIG0_SYNC				BIT(15)
++
+ /* Status Register #0 */
+ #define OA_TC6_REG_STATUS0			0x0008
+ #define STATUS0_RESETC				BIT(6)	/* Reset Complete */
+@@ -556,6 +560,21 @@ static int oa_tc6_unmask_macphy_error_interrupts(struct oa_tc6 *tc6)
+ 	return oa_tc6_write_register(tc6, OA_TC6_REG_INT_MASK0, regval);
+ }
+ 
++static int oa_tc6_enable_data_transfer(struct oa_tc6 *tc6)
++{
++	u32 value;
++	int ret;
++
++	ret = oa_tc6_read_register(tc6, OA_TC6_REG_CONFIG0, &value);
++	if (ret)
++		return ret;
++
++	/* Enable configuration synchronization for data transfer */
++	value |= CONFIG0_SYNC;
++
++	return oa_tc6_write_register(tc6, OA_TC6_REG_CONFIG0, value);
++}
++
+ /**
+  * oa_tc6_init - allocates and initializes oa_tc6 structure.
+  * @spi: device with which data will be exchanged.
+@@ -613,7 +632,18 @@ struct oa_tc6 *oa_tc6_init(struct spi_device *spi, struct net_device *netdev)
+ 		return NULL;
+ 	}
+ 
++	ret = oa_tc6_enable_data_transfer(tc6);
++	if (ret) {
++		dev_err(&tc6->spi->dev, "Failed to enable data transfer: %d\n",
++			ret);
++		goto phy_exit;
++	}
++
+ 	return tc6;
++
++phy_exit:
++	oa_tc6_phy_exit(tc6);
++	return NULL;
+ }
+ EXPORT_SYMBOL_GPL(oa_tc6_init);
+ 
+-- 
+2.34.1
+
+From git@z Thu Jan  1 00:00:00 1970
+Subject: [PATCH v4 8/12] net: ethernet: oa_tc6: implement transmit path to
+ transfer tx ethernet frames
+From: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Date: Thu, 18 Apr 2024 18:26:44 +0530
+Message-Id: <20240418125648.372526-9-Parthiban.Veerasooran@microchip.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+The transmit ethernet frame will be converted into multiple transmit data
+chunks. Each transmit data chunk consists of a 4 bytes header followed by
+a 64 bytes transmit data chunk payload. The 4 bytes data header occurs at
+the beginning of each transmit data chunk on MOSI. The data header
+contains the information needed to determine the validity and location of
+the transmit frame data within the data chunk payload. The number of
+transmit data chunks transmitted to mac-phy is limited to the number
+transmit credits available in the mac-phy. Initially the transmit credits
+will be updated from the buffer status register and then it will be
+updated from the footer received on each spi data transfer. The received
+footer will be examined for the transmit errors if any.
+
+Signed-off-by: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+---
+ drivers/net/ethernet/oa_tc6.c | 394 +++++++++++++++++++++++++++++++++-
+ include/linux/oa_tc6.h        |   1 +
+ 2 files changed, 393 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/ethernet/oa_tc6.c b/drivers/net/ethernet/oa_tc6.c
+index ef7069618319..b43d4cf14ac2 100644
+--- a/drivers/net/ethernet/oa_tc6.c
++++ b/drivers/net/ethernet/oa_tc6.c
+@@ -27,6 +27,13 @@
+ /* Status Register #0 */
+ #define OA_TC6_REG_STATUS0			0x0008
+ #define STATUS0_RESETC				BIT(6)	/* Reset Complete */
++#define STATUS0_HEADER_ERROR			BIT(5)
++#define STATUS0_LOSS_OF_FRAME_ERROR		BIT(4)
++#define STATUS0_TX_PROTOCOL_ERROR		BIT(0)
++
++/* Buffer Status Register */
++#define OA_TC6_REG_BUFFER_STATUS		0x000B
++#define BUFFER_STATUS_TX_CREDITS_AVAILABLE	GENMASK(15, 8)
+ 
+ /* Interrupt Mask Register #0 */
+ #define OA_TC6_REG_INT_MASK0			0x000C
+@@ -47,6 +54,21 @@
+ #define OA_TC6_CTRL_HEADER_LENGTH		GENMASK(7, 1)
+ #define OA_TC6_CTRL_HEADER_PARITY		BIT(0)
+ 
++/* Data header */
++#define OA_TC6_DATA_HEADER_DATA_NOT_CTRL	BIT(31)
++#define OA_TC6_DATA_HEADER_DATA_VALID		BIT(21)
++#define OA_TC6_DATA_HEADER_START_VALID		BIT(20)
++#define OA_TC6_DATA_HEADER_START_WORD_OFFSET	GENMASK(19, 16)
++#define OA_TC6_DATA_HEADER_END_VALID		BIT(14)
++#define OA_TC6_DATA_HEADER_END_BYTE_OFFSET	GENMASK(13, 8)
++#define OA_TC6_DATA_HEADER_PARITY		BIT(0)
++
++/* Data footer */
++#define OA_TC6_DATA_FOOTER_EXTENDED_STS		BIT(31)
++#define OA_TC6_DATA_FOOTER_RXD_HEADER_BAD	BIT(30)
++#define OA_TC6_DATA_FOOTER_CONFIG_SYNC		BIT(29)
++#define OA_TC6_DATA_FOOTER_TX_CREDITS		GENMASK(5, 1)
++
+ /* PHY – Clause 45 registers memory map selector (MMS) as per table 6 in the
+  * OPEN Alliance specification.
+  */
+@@ -64,6 +86,14 @@
+ 						(OA_TC6_CTRL_MAX_REGISTERS *\
+ 						OA_TC6_CTRL_REG_VALUE_SIZE) +\
+ 						OA_TC6_CTRL_IGNORED_SIZE)
++#define OA_TC6_CHUNK_PAYLOAD_SIZE		64
++#define OA_TC6_DATA_HEADER_SIZE			4
++#define OA_TC6_CHUNK_SIZE			(OA_TC6_DATA_HEADER_SIZE +\
++						OA_TC6_CHUNK_PAYLOAD_SIZE)
++#define OA_TC6_TX_SKB_QUEUE_SIZE		2
++#define OA_TC6_MAX_TX_CHUNKS			48
++#define OA_TC6_SPI_DATA_BUF_SIZE		(OA_TC6_MAX_TX_CHUNKS *\
++						OA_TC6_CHUNK_SIZE)
+ #define STATUS0_RESETC_POLL_DELAY		1000
+ #define STATUS0_RESETC_POLL_TIMEOUT		1000000
+ 
+@@ -77,10 +107,20 @@ struct oa_tc6 {
+ 	struct mutex spi_ctrl_lock; /* Protects spi control transfer */
+ 	void *spi_ctrl_tx_buf;
+ 	void *spi_ctrl_rx_buf;
++	void *spi_data_tx_buf;
++	void *spi_data_rx_buf;
++	struct sk_buff_head tx_skb_q;
++	struct sk_buff *tx_skb;
++	struct task_struct *spi_thread;
++	wait_queue_head_t spi_wq;
++	u16 tx_skb_offset;
++	u16 spi_data_tx_buf_offset;
++	u16 tx_credits;
+ };
+ 
+ enum oa_tc6_header_type {
+ 	OA_TC6_CTRL_HEADER,
++	OA_TC6_DATA_HEADER,
+ };
+ 
+ enum oa_tc6_register_op {
+@@ -88,14 +128,34 @@ enum oa_tc6_register_op {
+ 	OA_TC6_CTRL_REG_WRITE = 1,
+ };
+ 
++enum oa_tc6_data_valid_info {
++	OA_TC6_DATA_INVALID,
++	OA_TC6_DATA_VALID,
++};
++
++enum oa_tc6_data_start_valid_info {
++	OA_TC6_DATA_START_INVALID,
++	OA_TC6_DATA_START_VALID,
++};
++
++enum oa_tc6_data_end_valid_info {
++	OA_TC6_DATA_END_INVALID,
++	OA_TC6_DATA_END_VALID,
++};
++
+ static int oa_tc6_spi_transfer(struct oa_tc6 *tc6,
+ 			       enum oa_tc6_header_type header_type, u16 length)
+ {
+ 	struct spi_transfer xfer = { 0 };
+ 	struct spi_message msg;
+ 
+-	xfer.tx_buf = tc6->spi_ctrl_tx_buf;
+-	xfer.rx_buf = tc6->spi_ctrl_rx_buf;
++	if (header_type == OA_TC6_DATA_HEADER) {
++		xfer.tx_buf = tc6->spi_data_tx_buf;
++		xfer.rx_buf = tc6->spi_data_rx_buf;
++	} else {
++		xfer.tx_buf = tc6->spi_ctrl_tx_buf;
++		xfer.rx_buf = tc6->spi_ctrl_rx_buf;
++	}
+ 	xfer.len = length;
+ 
+ 	spi_message_init(&msg);
+@@ -575,6 +635,304 @@ static int oa_tc6_enable_data_transfer(struct oa_tc6 *tc6)
+ 	return oa_tc6_write_register(tc6, OA_TC6_REG_CONFIG0, value);
+ }
+ 
++static void oa_tc6_cleanup_ongoing_tx_skb(struct oa_tc6 *tc6)
++{
++	if (tc6->tx_skb) {
++		tc6->netdev->stats.tx_dropped++;
++		kfree_skb(tc6->tx_skb);
++		tc6->tx_skb = NULL;
++	}
++}
++
++static int oa_tc6_process_extended_status(struct oa_tc6 *tc6)
++{
++	u32 value;
++	int ret;
++
++	ret = oa_tc6_read_register(tc6, OA_TC6_REG_STATUS0, &value);
++	if (ret) {
++		netdev_err(tc6->netdev, "STATUS0 register read failed: %d\n",
++			   ret);
++		return -ENODEV;
++	}
++
++	/* Clear the error interrupts status */
++	ret = oa_tc6_write_register(tc6, OA_TC6_REG_STATUS0, value);
++	if (ret) {
++		netdev_err(tc6->netdev, "STATUS0 register write failed: %d\n",
++			   ret);
++		return -ENODEV;
++	}
++
++	if (FIELD_GET(STATUS0_TX_PROTOCOL_ERROR, value)) {
++		netdev_err(tc6->netdev, "Transmit protocol error\n");
++		return -ENODEV;
++	}
++	/* TODO: Currently loss of frame and header errors are treated as
++	 * non-recoverable errors. They will be handled in the next version.
++	 */
++	if (FIELD_GET(STATUS0_LOSS_OF_FRAME_ERROR, value)) {
++		netdev_err(tc6->netdev, "Loss of frame error\n");
++		return -ENODEV;
++	}
++	if (FIELD_GET(STATUS0_HEADER_ERROR, value)) {
++		netdev_err(tc6->netdev, "Header error\n");
++		return -ENODEV;
++	}
++
++	return 0;
++}
++
++static int oa_tc6_process_rx_chunk_footer(struct oa_tc6 *tc6, u32 footer)
++{
++	/* Process rx chunk footer for the following,
++	 * 1. tx credits
++	 * 2. errors if any from MAC-PHY
++	 */
++	tc6->tx_credits = FIELD_GET(OA_TC6_DATA_FOOTER_TX_CREDITS, footer);
++
++	if (FIELD_GET(OA_TC6_DATA_FOOTER_EXTENDED_STS, footer)) {
++		int ret = oa_tc6_process_extended_status(tc6);
++
++		if (ret)
++			return ret;
++	}
++
++	/* TODO: Currently received header bad and configuration unsync errors
++	 * are treated as non-recoverable errors. They will be handled in the
++	 * next version.
++	 */
++	if (FIELD_GET(OA_TC6_DATA_FOOTER_RXD_HEADER_BAD, footer)) {
++		netdev_err(tc6->netdev, "Rxd header bad error\n");
++		return -ENODEV;
++	}
++
++	if (!FIELD_GET(OA_TC6_DATA_FOOTER_CONFIG_SYNC, footer)) {
++		netdev_err(tc6->netdev, "Config unsync error\n");
++		return -ENODEV;
++	}
++
++	return 0;
++}
++
++static u32 oa_tc6_get_rx_chunk_footer(struct oa_tc6 *tc6, u16 footer_offset)
++{
++	u8 *rx_buf = tc6->spi_data_rx_buf;
++	__be32 footer;
++
++	footer = *((__be32 *)&rx_buf[footer_offset]);
++
++	return be32_to_cpu(footer);
++}
++
++static int oa_tc6_process_spi_data_rx_buf(struct oa_tc6 *tc6, u16 length)
++{
++	u16 no_of_rx_chunks = length / OA_TC6_CHUNK_SIZE;
++	u32 footer;
++	int ret;
++
++	/* All the rx chunks in the receive SPI data buffer are examined here */
++	for (int i = 0; i < no_of_rx_chunks; i++) {
++		/* Last 4 bytes in each received chunk consist footer info */
++		footer = oa_tc6_get_rx_chunk_footer(tc6, i * OA_TC6_CHUNK_SIZE +
++						    OA_TC6_CHUNK_PAYLOAD_SIZE);
++
++		ret = oa_tc6_process_rx_chunk_footer(tc6, footer);
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++static __be32 oa_tc6_prepare_data_header(bool data_valid, bool start_valid,
++					 bool end_valid, u8 end_byte_offset)
++{
++	u32 header = FIELD_PREP(OA_TC6_DATA_HEADER_DATA_NOT_CTRL,
++				OA_TC6_DATA_HEADER) |
++		     FIELD_PREP(OA_TC6_DATA_HEADER_DATA_VALID, data_valid) |
++		     FIELD_PREP(OA_TC6_DATA_HEADER_START_VALID, start_valid) |
++		     FIELD_PREP(OA_TC6_DATA_HEADER_END_VALID, end_valid) |
++		     FIELD_PREP(OA_TC6_DATA_HEADER_END_BYTE_OFFSET,
++				end_byte_offset);
++
++	header |= FIELD_PREP(OA_TC6_DATA_HEADER_PARITY,
++			     oa_tc6_get_parity(header));
++
++	return cpu_to_be32(header);
++}
++
++static void oa_tc6_add_tx_skb_to_spi_buf(struct oa_tc6 *tc6)
++{
++	enum oa_tc6_data_start_valid_info start_valid = OA_TC6_DATA_START_INVALID;
++	enum oa_tc6_data_end_valid_info end_valid = OA_TC6_DATA_END_INVALID;
++	__be32 *tx_buf = tc6->spi_data_tx_buf + tc6->spi_data_tx_buf_offset;
++	u16 remaining_length = tc6->tx_skb->len - tc6->tx_skb_offset;
++	u8 *tx_skb_data = tc6->tx_skb->data + tc6->tx_skb_offset;
++	u8 end_byte_offset = 0;
++	u16 length_to_copy;
++
++	/* Set start valid if the current tx chunk contains the start of the tx
++	 * ethernet frame.
++	 */
++	if (!tc6->tx_skb_offset)
++		start_valid = OA_TC6_DATA_START_VALID;
++
++	/* If the remaining tx skb length is more than the chunk payload size of
++	 * 64 bytes then copy only 64 bytes and leave the ongoing tx skb for
++	 * next tx chunk.
++	 */
++	length_to_copy = min_t(u16, remaining_length, OA_TC6_CHUNK_PAYLOAD_SIZE);
++
++	/* Copy the tx skb data to the tx chunk payload buffer */
++	memcpy(tx_buf + 1, tx_skb_data, length_to_copy);
++	tc6->tx_skb_offset += length_to_copy;
++
++	/* Set end valid if the current tx chunk contains the end of the tx
++	 * ethernet frame.
++	 */
++	if (tc6->tx_skb->len == tc6->tx_skb_offset) {
++		end_valid = OA_TC6_DATA_END_VALID;
++		end_byte_offset = length_to_copy - 1;
++		tc6->tx_skb_offset = 0;
++		tc6->netdev->stats.tx_bytes += tc6->tx_skb->len;
++		tc6->netdev->stats.tx_packets++;
++		kfree_skb(tc6->tx_skb);
++		tc6->tx_skb = NULL;
++	}
++
++	*tx_buf = oa_tc6_prepare_data_header(OA_TC6_DATA_VALID, start_valid,
++					     end_valid, end_byte_offset);
++	tc6->spi_data_tx_buf_offset += OA_TC6_CHUNK_SIZE;
++}
++
++static u16 oa_tc6_prepare_spi_tx_buf_for_tx_skbs(struct oa_tc6 *tc6)
++{
++	u16 used_tx_credits;
++
++	/* Get tx skbs and convert them into tx chunks based on the tx credits
++	 * available.
++	 */
++	for (used_tx_credits = 0; used_tx_credits < tc6->tx_credits;
++	     used_tx_credits++) {
++		if (!tc6->tx_skb)
++			tc6->tx_skb = skb_dequeue(&tc6->tx_skb_q);
++		if (!tc6->tx_skb)
++			break;
++		oa_tc6_add_tx_skb_to_spi_buf(tc6);
++	}
++
++	return used_tx_credits * OA_TC6_CHUNK_SIZE;
++}
++
++static int oa_tc6_try_spi_transfer(struct oa_tc6 *tc6)
++{
++	int ret;
++
++	while (true) {
++		u16 spi_length = 0;
++
++		tc6->spi_data_tx_buf_offset = 0;
++
++		if (tc6->tx_skb || !skb_queue_empty(&tc6->tx_skb_q))
++			spi_length = oa_tc6_prepare_spi_tx_buf_for_tx_skbs(tc6);
++
++		if (spi_length == 0)
++			break;
++
++		ret = oa_tc6_spi_transfer(tc6, OA_TC6_DATA_HEADER, spi_length);
++		if (ret) {
++			netdev_err(tc6->netdev, "SPI data transfer failed: %d\n",
++				   ret);
++			return ret;
++		}
++
++		ret = oa_tc6_process_spi_data_rx_buf(tc6, spi_length);
++		if (ret) {
++			oa_tc6_cleanup_ongoing_tx_skb(tc6);
++			netdev_err(tc6->netdev, "Device error: %d\n", ret);
++			return ret;
++		}
++
++		if (skb_queue_len(&tc6->tx_skb_q) < OA_TC6_TX_SKB_QUEUE_SIZE &&
++		    netif_queue_stopped(tc6->netdev))
++			netif_wake_queue(tc6->netdev);
++	}
++
++	return 0;
++}
++
++static int oa_tc6_spi_thread_handler(void *data)
++{
++	struct oa_tc6 *tc6 = data;
++	int ret;
++
++	while (likely(!kthread_should_stop())) {
++		/* This kthread will be waken up if there is a tx skb */
++		wait_event_interruptible(tc6->spi_wq,
++					 !skb_queue_empty(&tc6->tx_skb_q) ||
++					 kthread_should_stop());
++
++		if (kthread_should_stop())
++			break;
++
++		ret = oa_tc6_try_spi_transfer(tc6);
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++static int oa_tc6_update_buffer_status_from_register(struct oa_tc6 *tc6)
++{
++	u32 value;
++	int ret;
++
++	/* Initially tx credits to be updated from the register as there is no
++	 * data transfer performed yet. Later it will be updated from the rx
++	 * footer.
++	 */
++	ret = oa_tc6_read_register(tc6, OA_TC6_REG_BUFFER_STATUS, &value);
++	if (ret)
++		return ret;
++
++	tc6->tx_credits = FIELD_GET(BUFFER_STATUS_TX_CREDITS_AVAILABLE, value);
++
++	return 0;
++}
++
++/**
++ * oa_tc6_start_xmit - function for sending the tx skb which consists ethernet
++ * frame.
++ * @tc6: oa_tc6 struct.
++ * @skb: socket buffer in which the ethernet frame is stored.
++ *
++ * Returns NETDEV_TX_OK if the transmit ethernet frame skb added in the tx_skb_q
++ * otherwise returns NETDEV_TX_BUSY.
++ */
++netdev_tx_t oa_tc6_start_xmit(struct oa_tc6 *tc6, struct sk_buff *skb)
++{
++	if (skb_queue_len(&tc6->tx_skb_q) > OA_TC6_TX_SKB_QUEUE_SIZE) {
++		netif_stop_queue(tc6->netdev);
++		return NETDEV_TX_BUSY;
++	}
++
++	if (skb_linearize(skb)) {
++		dev_kfree_skb_any(skb);
++		tc6->netdev->stats.tx_dropped++;
++		return NETDEV_TX_OK;
++	}
++
++	skb_queue_tail(&tc6->tx_skb_q, skb);
++
++	/* Wake spi kthread to perform spi transfer */
++	wake_up_interruptible(&tc6->spi_wq);
++
++	return NETDEV_TX_OK;
++}
++EXPORT_SYMBOL_GPL(oa_tc6_start_xmit);
++
+ /**
+  * oa_tc6_init - allocates and initializes oa_tc6 structure.
+  * @spi: device with which data will be exchanged.
+@@ -611,6 +969,16 @@ struct oa_tc6 *oa_tc6_init(struct spi_device *spi, struct net_device *netdev)
+ 	if (!tc6->spi_ctrl_rx_buf)
+ 		return NULL;
+ 
++	tc6->spi_data_tx_buf = devm_kzalloc(&tc6->spi->dev,
++					    OA_TC6_SPI_DATA_BUF_SIZE, GFP_KERNEL);
++	if (!tc6->spi_data_tx_buf)
++		return NULL;
++
++	tc6->spi_data_rx_buf = devm_kzalloc(&tc6->spi->dev,
++					    OA_TC6_SPI_DATA_BUF_SIZE, GFP_KERNEL);
++	if (!tc6->spi_data_rx_buf)
++		return NULL;
++
+ 	ret = oa_tc6_sw_reset_macphy(tc6);
+ 	if (ret) {
+ 		dev_err(&tc6->spi->dev,
+@@ -639,6 +1007,25 @@ struct oa_tc6 *oa_tc6_init(struct spi_device *spi, struct net_device *netdev)
+ 		goto phy_exit;
+ 	}
+ 
++	ret = oa_tc6_update_buffer_status_from_register(tc6);
++	if (ret) {
++		dev_err(&tc6->spi->dev,
++			"Failed to update buffer status: %d\n", ret);
++		goto phy_exit;
++	}
++
++	skb_queue_head_init(&tc6->tx_skb_q);
++	init_waitqueue_head(&tc6->spi_wq);
++
++	tc6->spi_thread = kthread_run(oa_tc6_spi_thread_handler, tc6,
++				      "oa-tc6-spi-thread");
++	if (IS_ERR(tc6->spi_thread)) {
++		dev_err(&tc6->spi->dev, "Failed to create SPI thread\n");
++		goto phy_exit;
++	}
++
++	sched_set_fifo(tc6->spi_thread);
++
+ 	return tc6;
+ 
+ phy_exit:
+@@ -654,6 +1041,9 @@ EXPORT_SYMBOL_GPL(oa_tc6_init);
+ void oa_tc6_exit(struct oa_tc6 *tc6)
+ {
+ 	oa_tc6_phy_exit(tc6);
++	kthread_stop(tc6->spi_thread);
++	dev_kfree_skb_any(tc6->tx_skb);
++	skb_queue_purge(&tc6->tx_skb_q);
+ }
+ EXPORT_SYMBOL_GPL(oa_tc6_exit);
+ 
+diff --git a/include/linux/oa_tc6.h b/include/linux/oa_tc6.h
+index 606ba9f1e663..5c7811ac9cbe 100644
+--- a/include/linux/oa_tc6.h
++++ b/include/linux/oa_tc6.h
+@@ -20,3 +20,4 @@ int oa_tc6_write_registers(struct oa_tc6 *tc6, u32 address, u32 value[],
+ int oa_tc6_read_register(struct oa_tc6 *tc6, u32 address, u32 *value);
+ int oa_tc6_read_registers(struct oa_tc6 *tc6, u32 address, u32 value[],
+ 			  u8 length);
++netdev_tx_t oa_tc6_start_xmit(struct oa_tc6 *tc6, struct sk_buff *skb);
+-- 
+2.34.1
+
+From git@z Thu Jan  1 00:00:00 1970
+Subject: [PATCH v4 9/12] net: ethernet: oa_tc6: implement receive path to
+ receive rx ethernet frames
+From: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Date: Thu, 18 Apr 2024 18:26:45 +0530
+Message-Id: <20240418125648.372526-10-Parthiban.Veerasooran@microchip.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+SPI rx data buffer can contain one or more receive data chunks. A receive
+data chunk consists a 64 bytes receive data chunk payload followed a
+4 bytes data footer at the end. The data footer contains the information
+needed to determine the validity and location of the receive frame data
+within the receive data chunk payload and the host can use these
+information to generate ethernet frame. Initially the receive chunks
+available will be updated from the buffer status register and then it
+will be updated from the footer received on each spi data transfer. Tx
+data valid or empty chunks equal to the number receive chunks available
+will be transmitted in the MOSI to receive all the rx chunks.
+Additionally the receive data footer contains the below information as
+well. The received footer will be examined for the receive errors if any.
+
+Signed-off-by: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+---
+ drivers/net/ethernet/oa_tc6.c | 226 +++++++++++++++++++++++++++++++++-
+ 1 file changed, 223 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/ethernet/oa_tc6.c b/drivers/net/ethernet/oa_tc6.c
+index b43d4cf14ac2..fa08956a855f 100644
+--- a/drivers/net/ethernet/oa_tc6.c
++++ b/drivers/net/ethernet/oa_tc6.c
+@@ -29,11 +29,13 @@
+ #define STATUS0_RESETC				BIT(6)	/* Reset Complete */
+ #define STATUS0_HEADER_ERROR			BIT(5)
+ #define STATUS0_LOSS_OF_FRAME_ERROR		BIT(4)
++#define STATUS0_RX_BUFFER_OVERFLOW_ERROR	BIT(3)
+ #define STATUS0_TX_PROTOCOL_ERROR		BIT(0)
+ 
+ /* Buffer Status Register */
+ #define OA_TC6_REG_BUFFER_STATUS		0x000B
+ #define BUFFER_STATUS_TX_CREDITS_AVAILABLE	GENMASK(15, 8)
++#define BUFFER_STATUS_RX_CHUNKS_AVAILABLE	GENMASK(7, 0)
+ 
+ /* Interrupt Mask Register #0 */
+ #define OA_TC6_REG_INT_MASK0			0x000C
+@@ -67,6 +69,12 @@
+ #define OA_TC6_DATA_FOOTER_EXTENDED_STS		BIT(31)
+ #define OA_TC6_DATA_FOOTER_RXD_HEADER_BAD	BIT(30)
+ #define OA_TC6_DATA_FOOTER_CONFIG_SYNC		BIT(29)
++#define OA_TC6_DATA_FOOTER_RX_CHUNKS_AVAILABLE	GENMASK(28, 24)
++#define OA_TC6_DATA_FOOTER_DATA_VALID		BIT(21)
++#define OA_TC6_DATA_FOOTER_START_VALID		BIT(20)
++#define OA_TC6_DATA_FOOTER_START_WORD_OFFSET	GENMASK(19, 16)
++#define OA_TC6_DATA_FOOTER_END_VALID		BIT(14)
++#define OA_TC6_DATA_FOOTER_END_BYTE_OFFSET	GENMASK(13, 8)
+ #define OA_TC6_DATA_FOOTER_TX_CREDITS		GENMASK(5, 1)
+ 
+ /* PHY – Clause 45 registers memory map selector (MMS) as per table 6 in the
+@@ -111,11 +119,14 @@ struct oa_tc6 {
+ 	void *spi_data_rx_buf;
+ 	struct sk_buff_head tx_skb_q;
+ 	struct sk_buff *tx_skb;
++	struct sk_buff *rx_skb;
+ 	struct task_struct *spi_thread;
+ 	wait_queue_head_t spi_wq;
+ 	u16 tx_skb_offset;
+ 	u16 spi_data_tx_buf_offset;
+ 	u16 tx_credits;
++	u8 rx_chunks_available;
++	bool rx_buf_overflow;
+ };
+ 
+ enum oa_tc6_header_type {
+@@ -635,6 +646,15 @@ static int oa_tc6_enable_data_transfer(struct oa_tc6 *tc6)
+ 	return oa_tc6_write_register(tc6, OA_TC6_REG_CONFIG0, value);
+ }
+ 
++static void oa_tc6_cleanup_ongoing_rx_skb(struct oa_tc6 *tc6)
++{
++	if (tc6->rx_skb) {
++		tc6->netdev->stats.rx_dropped++;
++		kfree_skb(tc6->rx_skb);
++		tc6->rx_skb = NULL;
++	}
++}
++
+ static void oa_tc6_cleanup_ongoing_tx_skb(struct oa_tc6 *tc6)
+ {
+ 	if (tc6->tx_skb) {
+@@ -664,6 +684,13 @@ static int oa_tc6_process_extended_status(struct oa_tc6 *tc6)
+ 		return -ENODEV;
+ 	}
+ 
++	if (FIELD_GET(STATUS0_RX_BUFFER_OVERFLOW_ERROR, value)) {
++		tc6->rx_buf_overflow = true;
++		oa_tc6_cleanup_ongoing_rx_skb(tc6);
++		net_err_ratelimited("%s: Receive buffer overflow error\n",
++				    tc6->netdev->name);
++		return -EAGAIN;
++	}
+ 	if (FIELD_GET(STATUS0_TX_PROTOCOL_ERROR, value)) {
+ 		netdev_err(tc6->netdev, "Transmit protocol error\n");
+ 		return -ENODEV;
+@@ -688,8 +715,11 @@ static int oa_tc6_process_rx_chunk_footer(struct oa_tc6 *tc6, u32 footer)
+ 	/* Process rx chunk footer for the following,
+ 	 * 1. tx credits
+ 	 * 2. errors if any from MAC-PHY
++	 * 3. receive chunks available
+ 	 */
+ 	tc6->tx_credits = FIELD_GET(OA_TC6_DATA_FOOTER_TX_CREDITS, footer);
++	tc6->rx_chunks_available = FIELD_GET(OA_TC6_DATA_FOOTER_RX_CHUNKS_AVAILABLE,
++					     footer);
+ 
+ 	if (FIELD_GET(OA_TC6_DATA_FOOTER_EXTENDED_STS, footer)) {
+ 		int ret = oa_tc6_process_extended_status(tc6);
+@@ -715,6 +745,138 @@ static int oa_tc6_process_rx_chunk_footer(struct oa_tc6 *tc6, u32 footer)
+ 	return 0;
+ }
+ 
++static void oa_tc6_submit_rx_skb(struct oa_tc6 *tc6)
++{
++	tc6->rx_skb->protocol = eth_type_trans(tc6->rx_skb, tc6->netdev);
++	tc6->netdev->stats.rx_packets++;
++	tc6->netdev->stats.rx_bytes += tc6->rx_skb->len;
++
++	if (netif_rx(tc6->rx_skb) == NET_RX_DROP)
++		tc6->netdev->stats.rx_dropped++;
++
++	tc6->rx_skb = NULL;
++}
++
++static void oa_tc6_update_rx_skb(struct oa_tc6 *tc6, u8 *payload, u8 length)
++{
++	memcpy(skb_put(tc6->rx_skb, length), payload, length);
++}
++
++static int oa_tc6_allocate_rx_skb(struct oa_tc6 *tc6)
++{
++	tc6->rx_skb = netdev_alloc_skb(tc6->netdev, tc6->netdev->mtu + ETH_HLEN +
++				       ETH_FCS_LEN + NET_IP_ALIGN);
++	if (!tc6->rx_skb) {
++		tc6->netdev->stats.rx_dropped++;
++		return -ENOMEM;
++	}
++	skb_reserve(tc6->rx_skb, NET_IP_ALIGN);
++
++	return 0;
++}
++
++static int oa_tc6_prcs_complete_rx_frame(struct oa_tc6 *tc6, u8 *payload,
++					 u16 size)
++{
++	int ret;
++
++	ret = oa_tc6_allocate_rx_skb(tc6);
++	if (ret)
++		return ret;
++
++	oa_tc6_update_rx_skb(tc6, payload, size);
++
++	oa_tc6_submit_rx_skb(tc6);
++
++	return 0;
++}
++
++static int oa_tc6_prcs_rx_frame_start(struct oa_tc6 *tc6, u8 *payload, u16 size)
++{
++	int ret;
++
++	ret = oa_tc6_allocate_rx_skb(tc6);
++	if (ret)
++		return ret;
++
++	oa_tc6_update_rx_skb(tc6, payload, size);
++
++	return 0;
++}
++
++static void oa_tc6_prcs_rx_frame_end(struct oa_tc6 *tc6, u8 *payload, u16 size)
++{
++	oa_tc6_update_rx_skb(tc6, payload, size);
++
++	oa_tc6_submit_rx_skb(tc6);
++}
++
++static void oa_tc6_prcs_ongoing_rx_frame(struct oa_tc6 *tc6, u8 *payload,
++					 u32 footer)
++{
++	oa_tc6_update_rx_skb(tc6, payload, OA_TC6_CHUNK_PAYLOAD_SIZE);
++}
++
++static int oa_tc6_prcs_rx_chunk_payload(struct oa_tc6 *tc6, u8 *payload,
++					u32 footer)
++{
++	u8 start_byte_offset = FIELD_GET(OA_TC6_DATA_FOOTER_START_WORD_OFFSET,
++					 footer) * sizeof(u32);
++	u8 end_byte_offset = FIELD_GET(OA_TC6_DATA_FOOTER_END_BYTE_OFFSET,
++				       footer);
++	bool start_valid = FIELD_GET(OA_TC6_DATA_FOOTER_START_VALID, footer);
++	bool end_valid = FIELD_GET(OA_TC6_DATA_FOOTER_END_VALID, footer);
++	u16 size;
++
++	/* Restart the new rx frame after receiving rx buffer overflow error */
++	if (start_valid && tc6->rx_buf_overflow)
++		tc6->rx_buf_overflow = false;
++
++	if (tc6->rx_buf_overflow)
++		return 0;
++
++	/* Process the chunk with complete rx frame */
++	if (start_valid && end_valid && start_byte_offset < end_byte_offset) {
++		size = end_byte_offset + 1 - start_byte_offset;
++		return oa_tc6_prcs_complete_rx_frame(tc6, &payload[start_byte_offset],
++						     size);
++	}
++
++	/* Process the chunk with only rx frame start */
++	if (start_valid && !end_valid) {
++		size = OA_TC6_CHUNK_PAYLOAD_SIZE - start_byte_offset;
++		return oa_tc6_prcs_rx_frame_start(tc6, &payload[start_byte_offset],
++						  size);
++	}
++
++	/* Process the chunk with only rx frame end */
++	if (end_valid && !start_valid) {
++		size = end_byte_offset + 1;
++		oa_tc6_prcs_rx_frame_end(tc6, payload, size);
++		return 0;
++	}
++
++	/* Process the chunk with previous rx frame end and next rx frame start */
++	if (start_valid && end_valid && start_byte_offset > end_byte_offset) {
++		/* After rx buffer overflow error received, there might be a
++		 * possibility of getting an end valid of a previously
++		 * incomplete rx frame along with the new rx frame start valid.
++		 */
++		if (tc6->rx_skb) {
++			size = end_byte_offset + 1;
++			oa_tc6_prcs_rx_frame_end(tc6, payload, size);
++		}
++		size = OA_TC6_CHUNK_PAYLOAD_SIZE - start_byte_offset;
++		return oa_tc6_prcs_rx_frame_start(tc6, &payload[start_byte_offset],
++						  size);
++	}
++
++	/* Process the chunk with ongoing rx frame data */
++	oa_tc6_prcs_ongoing_rx_frame(tc6, payload, footer);
++
++	return 0;
++}
++
+ static u32 oa_tc6_get_rx_chunk_footer(struct oa_tc6 *tc6, u16 footer_offset)
+ {
+ 	u8 *rx_buf = tc6->spi_data_rx_buf;
+@@ -740,6 +902,18 @@ static int oa_tc6_process_spi_data_rx_buf(struct oa_tc6 *tc6, u16 length)
+ 		ret = oa_tc6_process_rx_chunk_footer(tc6, footer);
+ 		if (ret)
+ 			return ret;
++
++		/* If there is a data valid chunks then process it for the
++		 * information needed to determine the validity and the location
++		 * of the receive frame data.
++		 */
++		if (FIELD_GET(OA_TC6_DATA_FOOTER_DATA_VALID, footer)) {
++			u8 *payload = tc6->spi_data_rx_buf + i * OA_TC6_CHUNK_SIZE;
++
++			ret = oa_tc6_prcs_rx_chunk_payload(tc6, payload, footer);
++			if (ret)
++				return ret;
++		}
+ 	}
+ 
+ 	return 0;
+@@ -825,6 +999,42 @@ static u16 oa_tc6_prepare_spi_tx_buf_for_tx_skbs(struct oa_tc6 *tc6)
+ 	return used_tx_credits * OA_TC6_CHUNK_SIZE;
+ }
+ 
++static void oa_tc6_add_empty_chunks_to_spi_buf(struct oa_tc6 *tc6,
++					       u16 needed_empty_chunks)
++{
++	__be32 header;
++
++	header = oa_tc6_prepare_data_header(OA_TC6_DATA_INVALID,
++					    OA_TC6_DATA_START_INVALID,
++					    OA_TC6_DATA_END_INVALID, 0);
++
++	while (needed_empty_chunks--) {
++		__be32 *tx_buf = tc6->spi_data_tx_buf + tc6->spi_data_tx_buf_offset;
++
++		*tx_buf = header;
++		tc6->spi_data_tx_buf_offset += OA_TC6_CHUNK_SIZE;
++	}
++}
++
++static u16 oa_tc6_prepare_spi_tx_buf_for_rx_chunks(struct oa_tc6 *tc6, u16 len)
++{
++	u16 tx_chunks = len / OA_TC6_CHUNK_SIZE;
++	u16 needed_empty_chunks;
++
++	/* If there are more chunks to receive than to transmit, we need to add
++	 * enough empty tx chunks to allow the reception of the excess rx
++	 * chunks.
++	 */
++	if (tx_chunks >= tc6->rx_chunks_available)
++		return len;
++
++	needed_empty_chunks = tc6->rx_chunks_available - tx_chunks;
++
++	oa_tc6_add_empty_chunks_to_spi_buf(tc6, needed_empty_chunks);
++
++	return needed_empty_chunks * OA_TC6_CHUNK_SIZE + len;
++}
++
+ static int oa_tc6_try_spi_transfer(struct oa_tc6 *tc6)
+ {
+ 	int ret;
+@@ -837,6 +1047,9 @@ static int oa_tc6_try_spi_transfer(struct oa_tc6 *tc6)
+ 		if (tc6->tx_skb || !skb_queue_empty(&tc6->tx_skb_q))
+ 			spi_length = oa_tc6_prepare_spi_tx_buf_for_tx_skbs(tc6);
+ 
++		if (tc6->rx_chunks_available)
++			spi_length = oa_tc6_prepare_spi_tx_buf_for_rx_chunks(tc6, spi_length);
++
+ 		if (spi_length == 0)
+ 			break;
+ 
+@@ -849,7 +1062,11 @@ static int oa_tc6_try_spi_transfer(struct oa_tc6 *tc6)
+ 
+ 		ret = oa_tc6_process_spi_data_rx_buf(tc6, spi_length);
+ 		if (ret) {
++			if (ret == -EAGAIN)
++				continue;
++
+ 			oa_tc6_cleanup_ongoing_tx_skb(tc6);
++			oa_tc6_cleanup_ongoing_rx_skb(tc6);
+ 			netdev_err(tc6->netdev, "Device error: %d\n", ret);
+ 			return ret;
+ 		}
+@@ -889,15 +1106,17 @@ static int oa_tc6_update_buffer_status_from_register(struct oa_tc6 *tc6)
+ 	u32 value;
+ 	int ret;
+ 
+-	/* Initially tx credits to be updated from the register as there is no
+-	 * data transfer performed yet. Later it will be updated from the rx
+-	 * footer.
++	/* Initially tx credits and rx chunks available to be updated from the
++	 * register as there is no data transfer performed yet. Later they will
++	 * be updated from the rx footer.
+ 	 */
+ 	ret = oa_tc6_read_register(tc6, OA_TC6_REG_BUFFER_STATUS, &value);
+ 	if (ret)
+ 		return ret;
+ 
+ 	tc6->tx_credits = FIELD_GET(BUFFER_STATUS_TX_CREDITS_AVAILABLE, value);
++	tc6->rx_chunks_available = FIELD_GET(BUFFER_STATUS_RX_CHUNKS_AVAILABLE,
++					     value);
+ 
+ 	return 0;
+ }
+@@ -1043,6 +1262,7 @@ void oa_tc6_exit(struct oa_tc6 *tc6)
+ 	oa_tc6_phy_exit(tc6);
+ 	kthread_stop(tc6->spi_thread);
+ 	dev_kfree_skb_any(tc6->tx_skb);
++	dev_kfree_skb_any(tc6->rx_skb);
+ 	skb_queue_purge(&tc6->tx_skb_q);
+ }
+ EXPORT_SYMBOL_GPL(oa_tc6_exit);
+-- 
+2.34.1
+
+From git@z Thu Jan  1 00:00:00 1970
+Subject: [PATCH v4 10/12] net: ethernet: oa_tc6: implement mac-phy
+ interrupt
+From: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Date: Thu, 18 Apr 2024 18:26:46 +0530
+Message-Id: <20240418125648.372526-11-Parthiban.Veerasooran@microchip.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+The MAC-PHY interrupt is asserted when the following conditions are met.
+
+Receive chunks available - This interrupt is asserted when the previous
+data footer had no receive data chunks available and once the receive
+data chunks become available for reading. On reception of the first data
+header this interrupt will be deasserted.
+
+Transmit chunk credits available - This interrupt is asserted when the
+previous data footer indicated no transmit credits available and once the
+transmit credits become available for transmitting transmit data chunks.
+On reception of the first data header this interrupt will be deasserted.
+
+Extended status event - This interrupt is asserted when the previous data
+footer indicated no extended status and once the extended event become
+available. In this case the host should read status #0 register to know
+the corresponding error/event. On reception of the first data header this
+interrupt will be deasserted.
+
+Signed-off-by: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Reviewed-by: Andrew Lunn <andrew@lunn.ch>
+---
+ drivers/net/ethernet/oa_tc6.c | 53 +++++++++++++++++++++++++++++++++--
+ 1 file changed, 51 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/ethernet/oa_tc6.c b/drivers/net/ethernet/oa_tc6.c
+index fa08956a855f..9f17f3712137 100644
+--- a/drivers/net/ethernet/oa_tc6.c
++++ b/drivers/net/ethernet/oa_tc6.c
+@@ -127,6 +127,7 @@ struct oa_tc6 {
+ 	u16 tx_credits;
+ 	u8 rx_chunks_available;
+ 	bool rx_buf_overflow;
++	bool int_flag;
+ };
+ 
+ enum oa_tc6_header_type {
+@@ -1050,6 +1051,14 @@ static int oa_tc6_try_spi_transfer(struct oa_tc6 *tc6)
+ 		if (tc6->rx_chunks_available)
+ 			spi_length = oa_tc6_prepare_spi_tx_buf_for_rx_chunks(tc6, spi_length);
+ 
++		if (tc6->int_flag) {
++			tc6->int_flag = false;
++			if (spi_length == 0) {
++				oa_tc6_add_empty_chunks_to_spi_buf(tc6, 1);
++				spi_length = OA_TC6_CHUNK_SIZE;
++			}
++		}
++
+ 		if (spi_length == 0)
+ 			break;
+ 
+@@ -1085,8 +1094,10 @@ static int oa_tc6_spi_thread_handler(void *data)
+ 	int ret;
+ 
+ 	while (likely(!kthread_should_stop())) {
+-		/* This kthread will be waken up if there is a tx skb */
+-		wait_event_interruptible(tc6->spi_wq,
++		/* This kthread will be waken up if there is a tx skb or mac-phy
++		 * interrupt to perform spi transfer with tx chunks.
++		 */
++		wait_event_interruptible(tc6->spi_wq, tc6->int_flag ||
+ 					 !skb_queue_empty(&tc6->tx_skb_q) ||
+ 					 kthread_should_stop());
+ 
+@@ -1121,6 +1132,24 @@ static int oa_tc6_update_buffer_status_from_register(struct oa_tc6 *tc6)
+ 	return 0;
+ }
+ 
++static irqreturn_t oa_tc6_macphy_isr(int irq, void *data)
++{
++	struct oa_tc6 *tc6 = data;
++
++	/* MAC-PHY interrupt can occur for the following reasons.
++	 * - availability of tx credits if it was 0 before and not reported in
++	 *   the previous rx footer.
++	 * - availability of rx chunks if it was 0 before and not reported in
++	 *   the previous rx footer.
++	 * - extended status event not reported in the previous rx footer.
++	 */
++	tc6->int_flag = true;
++	/* Wake spi kthread to perform spi transfer */
++	wake_up_interruptible(&tc6->spi_wq);
++
++	return IRQ_HANDLED;
++}
++
+ /**
+  * oa_tc6_start_xmit - function for sending the tx skb which consists ethernet
+  * frame.
+@@ -1245,8 +1274,28 @@ struct oa_tc6 *oa_tc6_init(struct spi_device *spi, struct net_device *netdev)
+ 
+ 	sched_set_fifo(tc6->spi_thread);
+ 
++	ret = devm_request_irq(&tc6->spi->dev, tc6->spi->irq, oa_tc6_macphy_isr,
++			       IRQF_TRIGGER_FALLING, dev_name(&tc6->spi->dev),
++			       tc6);
++	if (ret) {
++		dev_err(&tc6->spi->dev, "Failed to request macphy isr %d\n",
++			ret);
++		goto kthread_stop;
++	}
++
++	/* oa_tc6_sw_reset_macphy() function resets and clears the MAC-PHY reset
++	 * complete status. IRQ is also asserted on reset completion and it is
++	 * remain asserted until MAC-PHY receives a data chunk. So performing an
++	 * empty data chunk transmission will deassert the IRQ. Refer section
++	 * 7.7 and 9.2.8.8 in the OPEN Alliance specification for more details.
++	 */
++	tc6->int_flag = true;
++	wake_up_interruptible(&tc6->spi_wq);
++
+ 	return tc6;
+ 
++kthread_stop:
++	kthread_stop(tc6->spi_thread);
+ phy_exit:
+ 	oa_tc6_phy_exit(tc6);
+ 	return NULL;
+-- 
+2.34.1
+
+From git@z Thu Jan  1 00:00:00 1970
+Subject: [PATCH v4 11/12] microchip: lan865x: add driver support for
+ Microchip's LAN865X MAC-PHY
+From: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Date: Thu, 18 Apr 2024 18:26:47 +0530
+Message-Id: <20240418125648.372526-12-Parthiban.Veerasooran@microchip.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+The LAN8650/1 is designed to conform to the OPEN Alliance 10BASE-T1x
+MAC-PHY Serial Interface specification, Version 1.1. The IEEE Clause 4
+MAC integration provides the low pin count standard SPI interface to any
+microcontroller therefore providing Ethernet functionality without
+requiring MAC integration within the microcontroller. The LAN8650/1
+operates as an SPI client supporting SCLK clock rates up to a maximum of
+25 MHz. This SPI interface supports the transfer of both data (Ethernet
+frames) and control (register access).
+
+By default, the chunk data payload is 64 bytes in size. The Ethernet
+Media Access Controller (MAC) module implements a 10 Mbps half duplex
+Ethernet MAC, compatible with the IEEE 802.3 standard. 10BASE-T1S
+physical layer transceiver integrated is into the LAN8650/1. The PHY and
+MAC are connected via an internal Media Independent Interface (MII).
+
+Signed-off-by: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+---
+ MAINTAINERS                                   |   6 +
+ drivers/net/ethernet/microchip/Kconfig        |   1 +
+ drivers/net/ethernet/microchip/Makefile       |   1 +
+ .../net/ethernet/microchip/lan865x/Kconfig    |  19 +
+ .../net/ethernet/microchip/lan865x/Makefile   |   6 +
+ .../net/ethernet/microchip/lan865x/lan865x.c  | 384 ++++++++++++++++++
+ 6 files changed, 417 insertions(+)
+ create mode 100644 drivers/net/ethernet/microchip/lan865x/Kconfig
+ create mode 100644 drivers/net/ethernet/microchip/lan865x/Makefile
+ create mode 100644 drivers/net/ethernet/microchip/lan865x/lan865x.c
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 603528948f61..f41b7f2257d2 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -14374,6 +14374,12 @@ L:	netdev@vger.kernel.org
+ S:	Maintained
+ F:	drivers/net/ethernet/microchip/lan743x_*
+ 
++MICROCHIP LAN8650/1 10BASE-T1S MACPHY ETHERNET DRIVER
++M:	Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
++L:	netdev@vger.kernel.org
++S:	Maintained
++F:	drivers/net/ethernet/microchip/lan865x/lan865x.c
++
+ MICROCHIP LAN87xx/LAN937x T1 PHY DRIVER
+ M:	Arun Ramadoss <arun.ramadoss@microchip.com>
+ R:	UNGLinuxDriver@microchip.com
+diff --git a/drivers/net/ethernet/microchip/Kconfig b/drivers/net/ethernet/microchip/Kconfig
+index 43ba71e82260..06ca79669053 100644
+--- a/drivers/net/ethernet/microchip/Kconfig
++++ b/drivers/net/ethernet/microchip/Kconfig
+@@ -56,6 +56,7 @@ config LAN743X
+ 	  To compile this driver as a module, choose M here. The module will be
+ 	  called lan743x.
+ 
++source "drivers/net/ethernet/microchip/lan865x/Kconfig"
+ source "drivers/net/ethernet/microchip/lan966x/Kconfig"
+ source "drivers/net/ethernet/microchip/sparx5/Kconfig"
+ source "drivers/net/ethernet/microchip/vcap/Kconfig"
+diff --git a/drivers/net/ethernet/microchip/Makefile b/drivers/net/ethernet/microchip/Makefile
+index bbd349264e6f..15dfbb321057 100644
+--- a/drivers/net/ethernet/microchip/Makefile
++++ b/drivers/net/ethernet/microchip/Makefile
+@@ -9,6 +9,7 @@ obj-$(CONFIG_LAN743X) += lan743x.o
+ 
+ lan743x-objs := lan743x_main.o lan743x_ethtool.o lan743x_ptp.o
+ 
++obj-$(CONFIG_LAN865X) += lan865x/
+ obj-$(CONFIG_LAN966X_SWITCH) += lan966x/
+ obj-$(CONFIG_SPARX5_SWITCH) += sparx5/
+ obj-$(CONFIG_VCAP) += vcap/
+diff --git a/drivers/net/ethernet/microchip/lan865x/Kconfig b/drivers/net/ethernet/microchip/lan865x/Kconfig
+new file mode 100644
+index 000000000000..f3d60d14e202
+--- /dev/null
++++ b/drivers/net/ethernet/microchip/lan865x/Kconfig
+@@ -0,0 +1,19 @@
++# SPDX-License-Identifier: GPL-2.0-only
++#
++# Microchip LAN865x Driver Support
++#
++
++if NET_VENDOR_MICROCHIP
++
++config LAN865X
++	tristate "LAN865x support"
++	depends on SPI
++	depends on OA_TC6
++	help
++	  Support for the Microchip LAN8650/1 Rev.B1 MACPHY Ethernet chip. It
++	  uses OPEN Alliance 10BASE-T1x Serial Interface specification.
++
++	  To compile this driver as a module, choose M here. The module will be
++	  called lan865x.
++
++endif # NET_VENDOR_MICROCHIP
+diff --git a/drivers/net/ethernet/microchip/lan865x/Makefile b/drivers/net/ethernet/microchip/lan865x/Makefile
+new file mode 100644
+index 000000000000..9f5dd89c1eb8
+--- /dev/null
++++ b/drivers/net/ethernet/microchip/lan865x/Makefile
+@@ -0,0 +1,6 @@
++# SPDX-License-Identifier: GPL-2.0-only
++#
++# Makefile for the Microchip LAN865x Driver
++#
++
++obj-$(CONFIG_LAN865X) += lan865x.o
+diff --git a/drivers/net/ethernet/microchip/lan865x/lan865x.c b/drivers/net/ethernet/microchip/lan865x/lan865x.c
+new file mode 100644
+index 000000000000..9abefa8b9d9f
+--- /dev/null
++++ b/drivers/net/ethernet/microchip/lan865x/lan865x.c
+@@ -0,0 +1,384 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Microchip's LAN865x 10BASE-T1S MAC-PHY driver
++ *
++ * Author: Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
++ */
++
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/phy.h>
++#include <linux/oa_tc6.h>
++
++#define DRV_NAME			"lan865x"
++
++/* MAC Network Control Register */
++#define LAN865X_REG_MAC_NET_CTL		0x00010000
++#define MAC_NET_CTL_TXEN		BIT(3) /* Transmit Enable */
++#define MAC_NET_CTL_RXEN		BIT(2) /* Receive Enable */
++
++#define LAN865X_REG_MAC_NET_CFG		0x00010001 /* MAC Network Configuration Reg */
++#define MAC_NET_CFG_PROMISCUOUS_MODE	BIT(4)
++#define MAC_NET_CFG_MULTICAST_MODE	BIT(6)
++#define MAC_NET_CFG_UNICAST_MODE	BIT(7)
++
++#define LAN865X_REG_MAC_L_HASH		0x00010020 /* MAC Hash Register Bottom */
++#define LAN865X_REG_MAC_H_HASH		0x00010021 /* MAC Hash Register Top */
++#define LAN865X_REG_MAC_L_SADDR1	0x00010022 /* MAC Specific Addr 1 Bottom Reg */
++#define LAN865X_REG_MAC_H_SADDR1	0x00010023 /* MAC Specific Addr 1 Top Reg */
++
++/* OPEN Alliance Configuration Register #0 */
++#define OA_TC6_REG_CONFIG0		0x0004
++#define CONFIG0_ZARFE_ENABLE		BIT(12)
++
++struct lan865x_priv {
++	struct work_struct multicast_work;
++	struct net_device *netdev;
++	struct spi_device *spi;
++	struct oa_tc6 *tc6;
++};
++
++static int lan865x_set_hw_macaddr_low_bytes(struct oa_tc6 *tc6, const u8 *mac)
++{
++	u32 regval;
++
++	regval = (mac[3] << 24) | (mac[2] << 16) | (mac[1] << 8) | mac[0];
++
++	return oa_tc6_write_register(tc6, LAN865X_REG_MAC_L_SADDR1, regval);
++}
++
++static int lan865x_set_hw_macaddr(struct lan865x_priv *priv, const u8 *mac)
++{
++	int restore_ret;
++	u32 regval;
++	int ret;
++
++	/* Configure MAC address low bytes */
++	ret = lan865x_set_hw_macaddr_low_bytes(priv->tc6, mac);
++	if (ret)
++		return ret;
++
++	/* Prepare and configure MAC address high bytes */
++	regval = (mac[5] << 8) | mac[4];
++	ret = oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_H_SADDR1, regval);
++	if (!ret)
++		return 0;
++
++	/* Restore the old MAC address low bytes from netdev if the new MAC
++	 * address high bytes setting failed.
++	 */
++	restore_ret = lan865x_set_hw_macaddr_low_bytes(priv->tc6,
++						       priv->netdev->dev_addr);
++	if (restore_ret)
++		return restore_ret;
++
++	return ret;
++}
++
++static void
++lan865x_get_drvinfo(struct net_device *netdev, struct ethtool_drvinfo *info)
++{
++	strscpy(info->driver, DRV_NAME, sizeof(info->driver));
++	strscpy(info->bus_info, dev_name(netdev->dev.parent),
++		sizeof(info->bus_info));
++}
++
++static const struct ethtool_ops lan865x_ethtool_ops = {
++	.get_drvinfo        = lan865x_get_drvinfo,
++	.get_link_ksettings = phy_ethtool_get_link_ksettings,
++	.set_link_ksettings = phy_ethtool_set_link_ksettings,
++};
++
++static int lan865x_set_mac_address(struct net_device *netdev, void *addr)
++{
++	struct lan865x_priv *priv = netdev_priv(netdev);
++	struct sockaddr *address = addr;
++	int ret;
++
++	ret = eth_prepare_mac_addr_change(netdev, addr);
++	if (ret < 0)
++		return ret;
++
++	if (ether_addr_equal(address->sa_data, netdev->dev_addr))
++		return 0;
++
++	ret = lan865x_set_hw_macaddr(priv, address->sa_data);
++	if (ret)
++		return ret;
++
++	eth_hw_addr_set(netdev, address->sa_data);
++
++	return 0;
++}
++
++static u32 lan865x_hash(u8 addr[ETH_ALEN])
++{
++	return (ether_crc(ETH_ALEN, addr) >> 26) & GENMASK(5, 0);
++}
++
++static void lan865x_set_specific_multicast_addr(struct net_device *netdev)
++{
++	struct lan865x_priv *priv = netdev_priv(netdev);
++	struct netdev_hw_addr *ha;
++	u32 hash_lo = 0;
++	u32 hash_hi = 0;
++
++	netdev_for_each_mc_addr(ha, netdev) {
++		u32 bit_num = lan865x_hash(ha->addr);
++		u32 mask = BIT(bit_num);
++
++		/* 5th bit of the 6 bits hash value is used to determine which
++		 * bit to set in either a high or low hash register.
++		 */
++		if (bit_num & BIT(5))
++			hash_hi |= mask;
++		else
++			hash_lo |= mask;
++	}
++
++	/* Enabling specific multicast addresses */
++	if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_H_HASH, hash_hi)) {
++		netdev_err(netdev, "Failed to write reg_hashh");
++		return;
++	}
++
++	if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_L_HASH, hash_lo))
++		netdev_err(netdev, "Failed to write reg_hashl");
++}
++
++static void lan865x_multicast_work_handler(struct work_struct *work)
++{
++	struct lan865x_priv *priv = container_of(work, struct lan865x_priv,
++						 multicast_work);
++	u32 regval = 0;
++
++	if (priv->netdev->flags & IFF_PROMISC) {
++		/* Enabling promiscuous mode */
++		regval |= MAC_NET_CFG_PROMISCUOUS_MODE;
++		regval &= (~MAC_NET_CFG_MULTICAST_MODE);
++		regval &= (~MAC_NET_CFG_UNICAST_MODE);
++	} else if (priv->netdev->flags & IFF_ALLMULTI) {
++		/* Enabling all multicast mode */
++		regval &= (~MAC_NET_CFG_PROMISCUOUS_MODE);
++		regval |= MAC_NET_CFG_MULTICAST_MODE;
++		regval &= (~MAC_NET_CFG_UNICAST_MODE);
++	} else if (!netdev_mc_empty(priv->netdev)) {
++		lan865x_set_specific_multicast_addr(priv->netdev);
++		regval &= (~MAC_NET_CFG_PROMISCUOUS_MODE);
++		regval &= (~MAC_NET_CFG_MULTICAST_MODE);
++		regval |= MAC_NET_CFG_UNICAST_MODE;
++	} else {
++		/* enabling local mac address only */
++		if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_H_HASH, 0)) {
++			netdev_err(priv->netdev, "Failed to write reg_hashh");
++			return;
++		}
++		if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_L_HASH, 0)) {
++			netdev_err(priv->netdev, "Failed to write reg_hashl");
++			return;
++		}
++	}
++	if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_NET_CFG, regval))
++		netdev_err(priv->netdev,
++			   "Failed to enable promiscuous/multicast/normal mode");
++}
++
++static void lan865x_set_multicast_list(struct net_device *netdev)
++{
++	struct lan865x_priv *priv = netdev_priv(netdev);
++
++	schedule_work(&priv->multicast_work);
++}
++
++static netdev_tx_t lan865x_send_packet(struct sk_buff *skb,
++				       struct net_device *netdev)
++{
++	struct lan865x_priv *priv = netdev_priv(netdev);
++
++	return oa_tc6_start_xmit(priv->tc6, skb);
++}
++
++static int lan865x_hw_disable(struct lan865x_priv *priv)
++{
++	u32 regval;
++
++	if (oa_tc6_read_register(priv->tc6, LAN865X_REG_MAC_NET_CTL, &regval))
++		return -ENODEV;
++
++	regval &= ~(MAC_NET_CTL_TXEN | MAC_NET_CTL_RXEN);
++
++	if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_NET_CTL, regval))
++		return -ENODEV;
++
++	return 0;
++}
++
++static int lan865x_net_close(struct net_device *netdev)
++{
++	struct lan865x_priv *priv = netdev_priv(netdev);
++	int ret;
++
++	netif_stop_queue(netdev);
++	phy_stop(netdev->phydev);
++	ret = lan865x_hw_disable(priv);
++	if (ret) {
++		netdev_err(netdev, "Failed to disable the hardware: %d\n", ret);
++		return ret;
++	}
++
++	return 0;
++}
++
++static int lan865x_hw_enable(struct lan865x_priv *priv)
++{
++	u32 regval;
++
++	if (oa_tc6_read_register(priv->tc6, LAN865X_REG_MAC_NET_CTL, &regval))
++		return -ENODEV;
++
++	regval |= MAC_NET_CTL_TXEN | MAC_NET_CTL_RXEN;
++
++	if (oa_tc6_write_register(priv->tc6, LAN865X_REG_MAC_NET_CTL, regval))
++		return -ENODEV;
++
++	return 0;
++}
++
++static int lan865x_net_open(struct net_device *netdev)
++{
++	struct lan865x_priv *priv = netdev_priv(netdev);
++	int ret;
++
++	ret = lan865x_hw_enable(priv);
++	if (ret) {
++		netdev_err(netdev, "Failed to enable hardware: %d\n", ret);
++		return ret;
++	}
++
++	phy_start(netdev->phydev);
++
++	return 0;
++}
++
++static const struct net_device_ops lan865x_netdev_ops = {
++	.ndo_open		= lan865x_net_open,
++	.ndo_stop		= lan865x_net_close,
++	.ndo_start_xmit		= lan865x_send_packet,
++	.ndo_set_rx_mode	= lan865x_set_multicast_list,
++	.ndo_set_mac_address	= lan865x_set_mac_address,
++};
++
++static int lan865x_set_zarfe(struct lan865x_priv *priv)
++{
++	u32 regval;
++	int ret;
++
++	ret = oa_tc6_read_register(priv->tc6, OA_TC6_REG_CONFIG0, &regval);
++	if (ret)
++		return ret;
++
++	/* Set Zero-Align Receive Frame Enable */
++	regval |= CONFIG0_ZARFE_ENABLE;
++
++	return oa_tc6_write_register(priv->tc6, OA_TC6_REG_CONFIG0, regval);
++}
++
++static int lan865x_probe(struct spi_device *spi)
++{
++	struct net_device *netdev;
++	struct lan865x_priv *priv;
++	int ret;
++
++	netdev = alloc_etherdev(sizeof(struct lan865x_priv));
++	if (!netdev)
++		return -ENOMEM;
++
++	priv = netdev_priv(netdev);
++	priv->netdev = netdev;
++	priv->spi = spi;
++	spi_set_drvdata(spi, priv);
++	INIT_WORK(&priv->multicast_work, lan865x_multicast_work_handler);
++
++	priv->tc6 = oa_tc6_init(spi, netdev);
++	if (!priv->tc6) {
++		ret = -ENODEV;
++		goto free_netdev;
++	}
++
++	/* As per the point s3 in the below errata, SPI receive Ethernet frame
++	 * transfer may halt when starting the next frame in the same data block
++	 * (chunk) as the end of a previous frame. The RFA field should be
++	 * configured to 01b or 10b for proper operation. In these modes, only
++	 * one receive Ethernet frame will be placed in a single data block.
++	 * When the RFA field is written to 01b, received frames will be forced
++	 * to only start in the first word of the data block payload (SWO=0). As
++	 * recommended, ZARFE bit in the OPEN Alliance CONFIG0 register is set
++	 * to 1 for proper operation.
++	 *
++	 * https://ww1.microchip.com/downloads/aemDocuments/documents/AIS/ProductDocuments/Errata/LAN8650-1-Errata-80001075.pdf
++	 */
++	ret = lan865x_set_zarfe(priv);
++	if (ret) {
++		dev_err(&spi->dev, "Failed to set ZARFE: %d\n", ret);
++		goto oa_tc6_exit;
++	}
++
++	/* Get the MAC address from the SPI device tree node */
++	if (device_get_ethdev_address(&spi->dev, netdev))
++		eth_hw_addr_random(netdev);
++
++	ret = lan865x_set_hw_macaddr(priv, netdev->dev_addr);
++	if (ret) {
++		dev_err(&spi->dev, "Failed to configure MAC: %d\n", ret);
++		goto oa_tc6_exit;
++	}
++
++	netdev->if_port = IF_PORT_10BASET;
++	netdev->irq = spi->irq;
++	netdev->netdev_ops = &lan865x_netdev_ops;
++	netdev->ethtool_ops = &lan865x_ethtool_ops;
++
++	ret = register_netdev(netdev);
++	if (ret) {
++		dev_err(&spi->dev, "Register netdev failed (ret = %d)", ret);
++		goto oa_tc6_exit;
++	}
++
++	return 0;
++
++oa_tc6_exit:
++	oa_tc6_exit(priv->tc6);
++free_netdev:
++	free_netdev(priv->netdev);
++	return ret;
++}
++
++static void lan865x_remove(struct spi_device *spi)
++{
++	struct lan865x_priv *priv = spi_get_drvdata(spi);
++
++	cancel_work_sync(&priv->multicast_work);
++	unregister_netdev(priv->netdev);
++	oa_tc6_exit(priv->tc6);
++	free_netdev(priv->netdev);
++}
++
++static const struct of_device_id lan865x_dt_ids[] = {
++	{ .compatible = "microchip,lan8651", "microchip,lan8650" },
++	{ /* Sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, lan865x_dt_ids);
++
++static struct spi_driver lan865x_driver = {
++	.driver = {
++		.name = DRV_NAME,
++		.of_match_table = lan865x_dt_ids,
++	 },
++	.probe = lan865x_probe,
++	.remove = lan865x_remove,
++};
++module_spi_driver(lan865x_driver);
++
++MODULE_DESCRIPTION(DRV_NAME " 10Base-T1S MACPHY Ethernet Driver");
++MODULE_AUTHOR("Parthiban Veerasooran <parthiban.veerasooran@microchip.com>");
++MODULE_LICENSE("GPL");
+-- 
+2.34.1
+
+From git@z Thu Jan  1 00:00:00 1970
+Subject: [PATCH v4 12/12] dt-bindings: net: add Microchip's LAN865X
+ 10BASE-T1S MACPHY
+From: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Date: Thu, 18 Apr 2024 18:26:48 +0530
+Message-Id: <20240418125648.372526-13-Parthiban.Veerasooran@microchip.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+The LAN8650/1 combines a Media Access Controller (MAC) and an Ethernet
+PHY to enable 10BASE-T1S networks. The Ethernet Media Access Controller
+(MAC) module implements a 10 Mbps half duplex Ethernet MAC, compatible
+with the IEEE 802.3 standard and a 10BASE-T1S physical layer transceiver
+integrated into the LAN8650/1. The communication between the Host and the
+MAC-PHY is specified in the OPEN Alliance 10BASE-T1x MACPHY Serial
+Interface (TC6).
+
+Signed-off-by: Parthiban Veerasooran <Parthiban.Veerasooran@microchip.com>
+Reviewed-by: Conor Dooley <conor.dooley@microchip.com>
+---
+ .../bindings/net/microchip,lan865x.yaml       | 80 +++++++++++++++++++
+ MAINTAINERS                                   |  1 +
+ 2 files changed, 81 insertions(+)
+ create mode 100644 Documentation/devicetree/bindings/net/microchip,lan865x.yaml
+
+diff --git a/Documentation/devicetree/bindings/net/microchip,lan865x.yaml b/Documentation/devicetree/bindings/net/microchip,lan865x.yaml
+new file mode 100644
+index 000000000000..4fdec0ba3532
+--- /dev/null
++++ b/Documentation/devicetree/bindings/net/microchip,lan865x.yaml
+@@ -0,0 +1,80 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/net/microchip,lan865x.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Microchip LAN8650/1 10BASE-T1S MACPHY Ethernet Controllers
++
++maintainers:
++  - Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
++
++description:
++  The LAN8650/1 combines a Media Access Controller (MAC) and an Ethernet
++  PHY to enable 10BASE‑T1S networks. The Ethernet Media Access Controller
++  (MAC) module implements a 10 Mbps half duplex Ethernet MAC, compatible
++  with the IEEE 802.3 standard and a 10BASE-T1S physical layer transceiver
++  integrated into the LAN8650/1. The communication between the Host and
++  the MAC-PHY is specified in the OPEN Alliance 10BASE-T1x MACPHY Serial
++  Interface (TC6).
++
++allOf:
++  - $ref: ethernet-controller.yaml#
++  - $ref: /schemas/spi/spi-peripheral-props.yaml#
++
++properties:
++  compatible:
++    oneOf:
++      - const: microchip,lan8650
++      - items:
++          - const: microchip,lan8651
++          - const: microchip,lan8650
++
++  reg:
++    maxItems: 1
++
++  interrupts:
++    description:
++      Interrupt from MAC-PHY asserted in the event of Receive Chunks
++      Available, Transmit Chunk Credits Available and Extended Status
++      Event.
++    maxItems: 1
++
++  spi-max-frequency:
++    minimum: 15000000
++    maximum: 25000000
++
++  "#address-cells":
++    const: 1
++
++  "#size-cells":
++    const: 0
++
++required:
++  - compatible
++  - reg
++  - interrupts
++  - spi-max-frequency
++
++unevaluatedProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/interrupt-controller/irq.h>
++    #include <dt-bindings/gpio/gpio.h>
++
++    spi {
++      #address-cells = <1>;
++      #size-cells = <0>;
++
++      ethernet@0 {
++        compatible = "microchip,lan8651", "microchip,lan8650";
++        reg = <0>;
++        pinctrl-names = "default";
++        pinctrl-0 = <&eth0_pins>;
++        interrupt-parent = <&gpio>;
++        interrupts = <6 IRQ_TYPE_EDGE_FALLING>;
++        local-mac-address = [04 05 06 01 02 03];
++        spi-max-frequency = <15000000>;
++      };
++    };
+diff --git a/MAINTAINERS b/MAINTAINERS
+index f41b7f2257d2..2172431a1935 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -14378,6 +14378,7 @@ MICROCHIP LAN8650/1 10BASE-T1S MACPHY ETHERNET DRIVER
+ M:	Parthiban Veerasooran <parthiban.veerasooran@microchip.com>
+ L:	netdev@vger.kernel.org
+ S:	Maintained
++F:	Documentation/devicetree/bindings/net/microchip,lan865x.yaml
+ F:	drivers/net/ethernet/microchip/lan865x/lan865x.c
+ 
+ MICROCHIP LAN87xx/LAN937x T1 PHY DRIVER
+-- 
+2.34.1
+
