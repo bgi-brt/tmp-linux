@@ -204,6 +204,12 @@
 		brcm,function = <BCM2835_FSEL_ALT0>;
 	};
 
+	eth1_pins: eth1_pins {
+		brcm,pins = <6>;
+		brcm,function = <0>; /* in */
+		brcm,pull = <0>; /* none */
+	};
+
 	spi0_cs_pins: spi0_cs_pins {
 		brcm,pins = <8 7>;
 		brcm,function = <BCM2835_FSEL_GPIO_OUT>;

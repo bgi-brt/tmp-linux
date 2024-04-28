@@ -288,6 +288,7 @@ static int lan865x_probe(struct spi_device *spi)
 	struct net_device *netdev;
 	struct lan865x_priv *priv;
 	int ret;
+	pr_warn("try oa tc6\n");
 
 	netdev = alloc_etherdev(sizeof(struct lan865x_priv));
 	if (!netdev)
@@ -301,6 +302,7 @@ static int lan865x_probe(struct spi_device *spi)
 
 	priv->tc6 = oa_tc6_init(spi, netdev);
 	if (!priv->tc6) {
+	pr_warn("try oa tc6 fw fail\n");
 		ret = -ENODEV;
 		goto free_netdev;
 	}
